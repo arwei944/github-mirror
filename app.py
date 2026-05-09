@@ -41,7 +41,7 @@ DATA_DIR = os.environ.get("DATA_DIR", "/data/user/work/github-mirror/data")
 Path(DATA_DIR).mkdir(parents=True, exist_ok=True)
 
 # 静态文件目录
-STATIC_DIR = os.path.join(os.path.dirname(__file__), "frontend")
+STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
 
 # ──────────────────────────────────────────────
 # GitHub API 请求工具
