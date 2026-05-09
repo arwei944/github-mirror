@@ -213,6 +213,11 @@ export default function CodeBrowse({ githubRepos }) {
   const [newFileForm, setNewFileForm] = useState({ path: '', content: '', message: '' })
   const [creatingFile, setCreatingFile] = useState(false)
   const [newFileMessage, setNewFileMessage] = useState('')
+  const [showBranchModal, setShowBranchModal] = useState(false)
+  const [branchAction, setBranchAction] = useState('create') // create, delete, rename
+  const [branchForm, setBranchForm] = useState({ name: '', from: '', new_name: '' })
+  const [branchSubmitting, setBranchSubmitting] = useState(false)
+  const [branchMessage, setBranchMessage] = useState('')
 
   const repoName = selectedRepo || (githubRepos.length > 0 ? githubRepos[0].name : '')
 
@@ -313,6 +318,70 @@ export default function CodeBrowse({ githubRepos }) {
     }
   }
 
+  const defaultBranch = branches.find(b => b.default)?.name || branches[0]?.name || ''
+
+  const openBranchModal = (action) => {
+    setBranchAction(action)
+    setBranchMessage('')
+    if (action === 'create') {
+      setBranchForm({ name: '', from: branch, new_name: '' })
+    } else if (action === 'delete') {
+      setBranchForm({ name: branch, from: '', new_name: '' })
+    } else if (action === 'rename') {
+      setBranchForm({ name: branch, from: '', new_name: '' })
+    }
+    setShowBranchModal(true)
+  }
+
+  const handleBranchAction = async () => {
+    setBranchSubmitting(true)
+    setBranchMessage('')
+    try {
+      if (branchAction === 'create') {
+        if (!branchForm.name.trim() || !branchForm.from.trim()) return
+        await api.post(`/api/github/repos/${repoName}/branches`, {
+          name: branchForm.name.trim(),
+          from: branchForm.from.trim(),
+        })
+        setBranchMessage('分支创建成功')
+        const brList = await api.get(`/api/github/repos/${repoName}/branches`)
+        setBranches(brList || [])
+      } else if (branchAction === 'delete') {
+        if (branchForm.name === defaultBranch) {
+          setBranchMessage('无法删除默认分支')
+          setBranchSubmitting(false)
+          return
+        }
+        if (!window.confirm(`确定要删除分支 "${branchForm.name}" 吗？此操作不可撤销。`)) {
+          setBranchSubmitting(false)
+          return
+        }
+        await api.del(`/api/github/repos/${repoName}/branches/${branchForm.name}`)
+        setBranchMessage('分支删除成功')
+        const brList = await api.get(`/api/github/repos/${repoName}/branches`)
+        setBranches(brList || [])
+        if (branch === branchForm.name) {
+          setBranch(defaultBranch)
+        }
+      } else if (branchAction === 'rename') {
+        if (!branchForm.name.trim() || !branchForm.new_name.trim()) return
+        await api.post(`/api/github/repos/${repoName}/branches/${branchForm.name}/rename`, {
+          new_name: branchForm.new_name.trim(),
+        })
+        setBranchMessage('分支重命名成功')
+        const brList = await api.get(`/api/github/repos/${repoName}/branches`)
+        setBranches(brList || [])
+        if (branch === branchForm.name) {
+          setBranch(branchForm.new_name.trim())
+        }
+      }
+    } catch (err) {
+      setBranchMessage('操作失败: ' + (err.message || '未知错误'))
+    } finally {
+      setBranchSubmitting(false)
+    }
+  }
+
   const sortedContents = [...contents].sort((a, b) => {
     if (a.type === 'dir' && b.type !== 'dir') return -1
     if (a.type !== 'dir' && b.type === 'dir') return 1
@@ -369,6 +438,30 @@ export default function CodeBrowse({ githubRepos }) {
           style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, padding: '4px 10px', whiteSpace: 'nowrap' }}
         >
           {Icon.plus(12)} 新建文件
+        </button>
+
+        {/* Branch management buttons */}
+        <button
+          className="btn-secondary"
+          onClick={() => openBranchModal('create')}
+          style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, padding: '4px 10px', whiteSpace: 'nowrap' }}
+        >
+          {Icon.gitBranch(12)} 新建分支
+        </button>
+        <button
+          className="btn-secondary"
+          onClick={() => openBranchModal('delete')}
+          disabled={branch === defaultBranch}
+          style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, padding: '4px 10px', whiteSpace: 'nowrap', color: branch === defaultBranch ? 'var(--mac-text-secondary)' : 'var(--mac-red)' }}
+        >
+          {Icon.trash(12)} 删除分支
+        </button>
+        <button
+          className="btn-secondary"
+          onClick={() => openBranchModal('rename')}
+          style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, padding: '4px 10px', whiteSpace: 'nowrap' }}
+        >
+          {Icon.code(12)} 重命名分支
         </button>
 
         <span style={{ fontSize: 11, color: 'var(--mac-text-secondary)' }}>
@@ -564,6 +657,157 @@ export default function CodeBrowse({ githubRepos }) {
                 style={{ fontSize: 13, padding: '6px 16px' }}
               >
                 {creatingFile ? '创建中...' : '创建文件'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Branch management modal */}
+      {showBranchModal && (
+        <div
+          className="animate-fade-in"
+          style={{
+            position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000,
+            backdropFilter: 'blur(8px)',
+          }}
+          onClick={() => setShowBranchModal(false)}
+        >
+          <div
+            className="glass"
+            style={{
+              width: 440, maxHeight: '80vh', overflow: 'auto',
+              padding: 24, display: 'flex', flexDirection: 'column', gap: 14,
+            }}
+            onClick={e => e.stopPropagation()}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <span style={{ fontSize: 16, fontWeight: 600 }}>
+                {branchAction === 'create' ? '新建分支' : branchAction === 'delete' ? '删除分支' : '重命名分支'}
+              </span>
+              <button className="btn-icon" onClick={() => setShowBranchModal(false)}>{Icon.back(14)}</button>
+            </div>
+
+            {branchAction === 'create' && (
+              <>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                  <label style={{ fontSize: 12, fontWeight: 500, color: 'var(--mac-text-secondary)' }}>新分支名称 *</label>
+                  <input
+                    type="text"
+                    value={branchForm.name}
+                    onChange={e => setBranchForm({ ...branchForm, name: e.target.value })}
+                    placeholder="new-branch-name"
+                    style={{
+                      padding: '6px 12px', borderRadius: 'var(--mac-radius)', border: '1px solid var(--mac-border)',
+                      background: 'var(--mac-bg)', color: 'var(--mac-text)', fontSize: 13, outline: 'none',
+                      fontFamily: 'monospace',
+                    }}
+                  />
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                  <label style={{ fontSize: 12, fontWeight: 500, color: 'var(--mac-text-secondary)' }}>来源分支 *</label>
+                  <select
+                    value={branchForm.from}
+                    onChange={e => setBranchForm({ ...branchForm, from: e.target.value })}
+                    style={{
+                      padding: '6px 12px', borderRadius: 'var(--mac-radius)', border: '1px solid var(--mac-border)',
+                      background: 'var(--mac-bg)', color: 'var(--mac-text)', fontSize: 13, outline: 'none',
+                    }}
+                  >
+                    {branches.map(b => (
+                      <option key={b.name} value={b.name}>{b.name}</option>
+                    ))}
+                  </select>
+                </div>
+              </>
+            )}
+
+            {branchAction === 'delete' && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                <label style={{ fontSize: 12, fontWeight: 500, color: 'var(--mac-text-secondary)' }}>要删除的分支</label>
+                <select
+                  value={branchForm.name}
+                  onChange={e => setBranchForm({ ...branchForm, name: e.target.value })}
+                  disabled
+                  style={{
+                    padding: '6px 12px', borderRadius: 'var(--mac-radius)', border: '1px solid var(--mac-border)',
+                    background: 'var(--mac-bg)', color: 'var(--mac-text)', fontSize: 13, outline: 'none',
+                  }}
+                >
+                  {branches.filter(b => b.name !== defaultBranch).map(b => (
+                    <option key={b.name} value={b.name}>{b.name}</option>
+                  ))}
+                </select>
+                <span style={{ fontSize: 11, color: 'var(--mac-red)' }}>此操作不可撤销</span>
+              </div>
+            )}
+
+            {branchAction === 'rename' && (
+              <>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                  <label style={{ fontSize: 12, fontWeight: 500, color: 'var(--mac-text-secondary)' }}>当前分支</label>
+                  <input
+                    type="text"
+                    value={branchForm.name}
+                    disabled
+                    style={{
+                      padding: '6px 12px', borderRadius: 'var(--mac-radius)', border: '1px solid var(--mac-border)',
+                      background: 'var(--mac-bg)', color: 'var(--mac-text)', fontSize: 13, outline: 'none',
+                      fontFamily: 'monospace',
+                    }}
+                  />
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                  <label style={{ fontSize: 12, fontWeight: 500, color: 'var(--mac-text-secondary)' }}>新名称 *</label>
+                  <input
+                    type="text"
+                    value={branchForm.new_name}
+                    onChange={e => setBranchForm({ ...branchForm, new_name: e.target.value })}
+                    placeholder="new-branch-name"
+                    style={{
+                      padding: '6px 12px', borderRadius: 'var(--mac-radius)', border: '1px solid var(--mac-border)',
+                      background: 'var(--mac-bg)', color: 'var(--mac-text)', fontSize: 13, outline: 'none',
+                      fontFamily: 'monospace',
+                    }}
+                  />
+                </div>
+              </>
+            )}
+
+            {branchMessage && (
+              <div style={{
+                fontSize: 12, padding: '6px 12px', borderRadius: 'var(--mac-radius)',
+                background: branchMessage.includes('失败') || branchMessage.includes('无法') ? 'rgba(255,59,48,0.1)' : 'rgba(52,199,89,0.1)',
+                color: branchMessage.includes('失败') || branchMessage.includes('无法') ? 'var(--mac-red)' : 'var(--mac-green)',
+              }}>
+                {branchMessage}
+              </div>
+            )}
+
+            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+              <button
+                className="btn-secondary"
+                onClick={() => setShowBranchModal(false)}
+                style={{ fontSize: 13, padding: '6px 16px' }}
+              >
+                取消
+              </button>
+              <button
+                className="btn-primary"
+                onClick={handleBranchAction}
+                disabled={
+                  branchSubmitting ||
+                  (branchAction === 'create' && (!branchForm.name.trim() || !branchForm.from.trim())) ||
+                  (branchAction === 'rename' && (!branchForm.name.trim() || !branchForm.new_name.trim()))
+                }
+                style={{
+                  fontSize: 13, padding: '6px 16px',
+                  color: branchAction === 'delete' ? 'white' : undefined,
+                  background: branchAction === 'delete' ? 'var(--mac-red)' : undefined,
+                }}
+              >
+                {branchSubmitting ? '处理中...' : (branchAction === 'create' ? '创建' : branchAction === 'delete' ? '删除' : '重命名')}
               </button>
             </div>
           </div>
