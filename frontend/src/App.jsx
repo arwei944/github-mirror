@@ -11,6 +11,7 @@ import PullDetail from './pages/PullDetail'
 import Actions from './pages/Actions'
 import CodeBrowse from './pages/CodeBrowse'
 import Search from './pages/Search'
+import Settings from './pages/Settings'
 
 // ============ Icons ============
 const Icon = {
@@ -180,6 +181,7 @@ export default function App() {
     { key: 'actions', label: 'Actions', icon: Icon.zap(16) },
     { key: 'code', label: '代码浏览', icon: Icon.code(16) },
     { key: 'search', label: '搜索', icon: Icon.search(16) },
+    { key: 'settings', label: '设置', icon: Icon.tag(16) },
     { key: 'activity', label: '活动流', icon: Icon.activity(16) },
     { key: 'deploy', label: '部署管理', icon: Icon.deploy(16) },
   ]
@@ -260,6 +262,12 @@ export default function App() {
             onSelectRepo={handleSelectRepo}
           />
         )
+      case 'settings':
+        return (
+          <Settings
+            githubRepos={githubRepos}
+          />
+        )
       case 'activity':
         return (
           <Activity
@@ -290,7 +298,7 @@ export default function App() {
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <span style={{ color: 'var(--mac-text)' }}>{Icon.github(18)}</span>
             <span style={{ fontSize: 15, fontWeight: 600, letterSpacing: '-0.02em' }}>GitHub Mirror</span>
-            <span style={{ fontSize: 9, padding: '1px 6px', borderRadius: 8, background: 'var(--mac-accent)', color: 'white', fontWeight: 500 }}>v2.4</span>
+            <span style={{ fontSize: 9, padding: '1px 6px', borderRadius: 8, background: 'var(--mac-accent)', color: 'white', fontWeight: 500 }}>v2.5</span>
           </div>
         </div>
 
