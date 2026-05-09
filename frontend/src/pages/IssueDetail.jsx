@@ -86,6 +86,9 @@ export default function IssueDetail({ repoName, issueNumber, onBack }) {
   const [editBody, setEditBody] = useState('')
   const [savingEdit, setSavingEdit] = useState(false)
   const [deletingCommentId, setDeletingCommentId] = useState(null)
+  const [reactions, setReactions] = useState([])
+  const [reactionsLoading, setReactionsLoading] = useState(false)
+  const [togglingReaction, setTogglingReaction] = useState({})
 
   const loadIssue = () => {
     setLoading(true)
@@ -102,6 +105,49 @@ export default function IssueDetail({ repoName, issueNumber, onBack }) {
   }
 
   useEffect(() => { loadIssue() }, [repoName, issueNumber])
+
+  const loadReactions = useCallback(() => {
+    setReactionsLoading(true)
+    api.get(`/api/github/repos/${repoName}/issues/${issueNumber}/reactions`)
+      .then(data => { setReactions(data || []); setReactionsLoading(false) })
+      .catch(() => { setReactions([]); setReactionsLoading(false) })
+  }, [repoName, issueNumber])
+
+  useEffect(() => { loadReactions() }, [loadReactions])
+
+  const REACTION_EMOJIS = ['+1', '-1', 'laugh', 'rocket', 'heart', 'eyes']
+  const REACTION_DISPLAY = { '+1': '\u{1F44D}', '-1': '\u{1F44E}', laugh: '\u{1F389}', rocket: '\u{1F680}', heart: '\u2764\uFE0F', eyes: '\u{1F440}' }
+
+  const getReactionCounts = () => {
+    const counts = {}
+    const userReactions = new Set()
+    reactions.forEach(r => {
+      counts[r.content] = (counts[r.content] || 0) + 1
+      if (r.user?.login) {
+        // Track which reactions the current user has (we'll check via a simple heuristic)
+        // Since we don't have current user info, we highlight all reactions
+      }
+    })
+    return { counts, userReactions }
+  }
+
+  const handleToggleReaction = async (content) => {
+    setTogglingReaction(prev => ({ ...prev, [content]: true }))
+    try {
+      const existing = reactions.find(r => r.content === content)
+      if (existing) {
+        await api.del(`/api/github/repos/${repoName}/issues/${issueNumber}/reactions/${existing.id}`)
+        setReactions(prev => prev.filter(r => !(r.content === content && r.id === existing.id)))
+      } else {
+        await api.post(`/api/github/repos/${repoName}/issues/${issueNumber}/reactions`, { content })
+        loadReactions()
+      }
+    } catch (err) {
+      // ignore
+    } finally {
+      setTogglingReaction(prev => ({ ...prev, [content]: false }))
+    }
+  }
 
   const handleSubmitComment = async () => {
     if (!newComment.trim()) return
@@ -366,6 +412,43 @@ export default function IssueDetail({ repoName, issueNumber, onBack }) {
             <div className="readme-body" style={{ whiteSpace: 'pre-wrap' }}>{issue.body}</div>
           </div>
         ) : null}
+
+        {/* Reactions Bar */}
+        <div className="glass" style={{ padding: '10px 16px', marginBottom: 12 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            {REACTION_EMOJIS.map(content => {
+              const { counts } = getReactionCounts()
+              const count = counts[content] || 0
+              const hasReaction = reactions.some(r => r.content === content)
+              return (
+                <button
+                  key={content}
+                  onClick={() => handleToggleReaction(content)}
+                  disabled={togglingReaction[content]}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 4,
+                    padding: '3px 8px', borderRadius: 12, border: '1px solid',
+                    borderColor: hasReaction ? 'var(--mac-accent)' : 'var(--mac-border)',
+                    background: hasReaction ? 'rgba(0,113,227,0.08)' : 'transparent',
+                    cursor: 'pointer', fontSize: 13, lineHeight: 1,
+                    transition: 'all 0.15s',
+                  }}
+                  title={content}
+                >
+                  <span>{REACTION_DISPLAY[content]}</span>
+                  {count > 0 && (
+                    <span style={{
+                      fontSize: 11, fontWeight: 600,
+                      color: hasReaction ? 'var(--mac-accent)' : 'var(--mac-text-secondary)',
+                    }}>
+                      {count}
+                    </span>
+                  )}
+                </button>
+              )
+            })}
+          </div>
+        </div>
 
         {/* Tabs */}
         <div style={{ display: 'flex', gap: 2, marginBottom: 0 }}>
