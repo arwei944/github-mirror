@@ -20,7 +20,7 @@ from fastapi import FastAPI, Query, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 
-__version__ = "3.6.0"
+__version__ = "4.3.0"
 
 app = FastAPI(
     version=__version__,
@@ -2150,6 +2150,651 @@ async def delete_branch_protection(repo_name: str, branch: str):
     if status != 204:
         raise HTTPException(status_code=status, detail=f"删除分支保护失败: {data}")
     return {"message": f"已删除 {branch} 分支保护规则"}
+
+
+# ──────────────────────────────────────────────
+# GitHub Reactions API (v4.1.0)
+# ──────────────────────────────────────────────
+@app.get("/api/github/repos/{repo_name}/issues/{issue_number}/reactions")
+async def list_issue_reactions(repo_name: str, issue_number: int):
+    """获取 Issue 表情反应列表"""
+    status, data = github_api_get(f"/repos/{GITHUB_USER}/{repo_name}/issues/{issue_number}/reactions")
+    if status != 200:
+        raise HTTPException(status_code=status, detail=f"获取表情反应失败: {data}")
+    return data if isinstance(data, list) else []
+
+
+@app.post("/api/github/repos/{repo_name}/issues/{issue_number}/reactions")
+async def create_issue_reaction(repo_name: str, issue_number: int, request: Request):
+    """给 Issue 添加表情反应"""
+    body = await request.json()
+    status, data = github_api_post(f"/repos/{GITHUB_USER}/{repo_name}/issues/{issue_number}/reactions", body)
+    if status != 201:
+        raise HTTPException(status_code=status, detail=f"添加表情反应失败: {data}")
+    return data
+
+
+@app.delete("/api/github/repos/{repo_name}/issues/{issue_number}/reactions/{reaction_id}")
+async def delete_issue_reaction(repo_name: str, issue_number: int, reaction_id: int):
+    """删除 Issue 表情反应"""
+    status, data = github_api_delete(f"/repos/{GITHUB_USER}/{repo_name}/issues/{issue_number}/reactions/{reaction_id}")
+    if status != 204:
+        raise HTTPException(status_code=status, detail=f"删除表情反应失败: {data}")
+    return {"message": "已删除表情反应"}
+
+
+@app.get("/api/github/repos/{repo_name}/issues/comments/{comment_id}/reactions")
+async def list_comment_reactions(repo_name: str, comment_id: int):
+    """获取评论表情反应列表"""
+    status, data = github_api_get(f"/repos/{GITHUB_USER}/{repo_name}/issues/comments/{comment_id}/reactions")
+    if status != 200:
+        raise HTTPException(status_code=status, detail=f"获取评论表情反应失败: {data}")
+    return data if isinstance(data, list) else []
+
+
+@app.post("/api/github/repos/{repo_name}/issues/comments/{comment_id}/reactions")
+async def create_comment_reaction(repo_name: str, comment_id: int, request: Request):
+    """给评论添加表情反应"""
+    body = await request.json()
+    status, data = github_api_post(f"/repos/{GITHUB_USER}/{repo_name}/issues/comments/{comment_id}/reactions", body)
+    if status != 201:
+        raise HTTPException(status_code=status, detail=f"添加评论表情反应失败: {data}")
+    return data
+
+
+@app.delete("/api/github/repos/{repo_name}/issues/comments/{comment_id}/reactions/{reaction_id}")
+async def delete_comment_reaction(repo_name: str, comment_id: int, reaction_id: int):
+    """删除评论表情反应"""
+    status, data = github_api_delete(f"/repos/{GITHUB_USER}/{repo_name}/issues/comments/{comment_id}/reactions/{reaction_id}")
+    if status != 204:
+        raise HTTPException(status_code=status, detail=f"删除评论表情反应失败: {data}")
+    return {"message": "已删除评论表情反应"}
+
+
+@app.get("/api/github/repos/{repo_name}/pulls/{pull_number}/comments/{comment_id}/reactions")
+async def list_pr_comment_reactions(repo_name: str, pull_number: int, comment_id: int):
+    """获取 PR 评论表情反应"""
+    status, data = github_api_get(f"/repos/{GITHUB_USER}/{repo_name}/pulls/comments/{comment_id}/reactions")
+    if status != 200:
+        raise HTTPException(status_code=status, detail=f"获取 PR 评论表情反应失败: {data}")
+    return data if isinstance(data, list) else []
+
+
+@app.post("/api/github/repos/{repo_name}/pulls/{pull_number}/comments/{comment_id}/reactions")
+async def create_pr_comment_reaction(repo_name: str, pull_number: int, comment_id: int, request: Request):
+    """给 PR 评论添加表情反应"""
+    body = await request.json()
+    status, data = github_api_post(f"/repos/{GITHUB_USER}/{repo_name}/pulls/comments/{comment_id}/reactions", body)
+    if status != 201:
+        raise HTTPException(status_code=status, detail=f"添加 PR 评论表情反应失败: {data}")
+    return data
+
+
+@app.delete("/api/github/repos/{repo_name}/pulls/{pull_number}/comments/{comment_id}/reactions/{reaction_id}")
+async def delete_pr_comment_reaction(repo_name: str, pull_number: int, comment_id: int, reaction_id: int):
+    """删除 PR 评论表情反应"""
+    status, data = github_api_delete(f"/repos/{GITHUB_USER}/{repo_name}/pulls/comments/{comment_id}/reactions/{reaction_id}")
+    if status != 204:
+        raise HTTPException(status_code=status, detail=f"删除 PR 评论表情反应失败: {data}")
+    return {"message": "已删除 PR 评论表情反应"}
+
+
+# ──────────────────────────────────────────────
+# GitHub Discussions API (v4.1.0)
+# ──────────────────────────────────────────────
+@app.get("/api/github/repos/{repo_name}/discussions")
+async def list_discussions(repo_name: str, per_page: int = Query(30, ge=1, le=100)):
+    """获取仓库讨论列表（需要 GraphQL，此处用 Search API 替代）"""
+    qs = urllib.parse.urlencode({"q": f"repo:{GITHUB_USER}/{repo_name} is:open", "per_page": per_page})
+    status, data = github_api_get(f"/search/issues?{qs}")
+    if status != 200:
+        raise HTTPException(status_code=status, detail=f"获取讨论列表失败: {data}")
+    items = data.get("items", []) if isinstance(data, dict) else []
+    discussions = [i for i in items if i.get("html_url", "").split("/").count("/") >= 7 and "discussions" in (i.get("html_url") or "")]
+    return {"total_count": len(discussions), "items": discussions}
+
+
+@app.get("/api/github/repos/{repo_name}/discussions/categories")
+async def list_discussion_categories(repo_name: str):
+    """获取讨论分类列表"""
+    status, data = github_api_get(f"/repos/{GITHUB_USER}/{repo_name}/discussions/categories")
+    if status != 200:
+        raise HTTPException(status_code=status, detail=f"获取讨论分类失败: {data}")
+    return data if isinstance(data, list) else []
+
+
+# ──────────────────────────────────────────────
+# GitHub Projects V2 API (v4.1.0)
+# ──────────────────────────────────────────────
+@app.get("/api/github/repos/{repo_name}/projects")
+async def list_repo_projects(repo_name: str, state: str = Query("open", description="open/closed/all")):
+    """获取仓库项目列表"""
+    qs = urllib.parse.urlencode({"state": state})
+    status, data = github_api_get(f"/repos/{GITHUB_USER}/{repo_name}/projects?{qs}")
+    if status != 200:
+        raise HTTPException(status_code=status, detail=f"获取项目列表失败: {data}")
+    return data if isinstance(data, list) else []
+
+
+@app.post("/api/github/repos/{repo_name}/projects")
+async def create_repo_project(repo_name: str, request: Request):
+    """创建仓库项目"""
+    body = await request.json()
+    status, data = github_api_post(f"/repos/{GITHUB_USER}/{repo_name}/projects", body)
+    if status != 201:
+        raise HTTPException(status_code=status, detail=f"创建项目失败: {data}")
+    return data
+
+
+@app.get("/api/github/projects/{project_id}")
+async def get_project(project_id: int):
+    """获取项目详情"""
+    status, data = github_api_get(f"/projects/{project_id}")
+    if status != 200:
+        raise HTTPException(status_code=status, detail=f"获取项目详情失败: {data}")
+    return data
+
+
+@app.patch("/api/github/projects/{project_id}")
+async def update_project(project_id: int, request: Request):
+    """更新项目"""
+    body = await request.json()
+    status, data = github_api_patch(f"/projects/{project_id}", body)
+    if status != 200:
+        raise HTTPException(status_code=status, detail=f"更新项目失败: {data}")
+    return data
+
+
+@app.delete("/api/github/projects/{project_id}")
+async def delete_project_v2(project_id: int):
+    """删除项目"""
+    status, data = github_api_delete(f"/projects/{project_id}")
+    if status != 204:
+        raise HTTPException(status_code=status, detail=f"删除项目失败: {data}")
+    return {"message": f"已删除项目 {project_id}"}
+
+
+@app.get("/api/github/projects/{project_id}/columns")
+async def list_project_columns(project_id: int):
+    """获取项目列"""
+    status, data = github_api_get(f"/projects/{project_id}/columns")
+    if status != 200:
+        raise HTTPException(status_code=status, detail=f"获取项目列失败: {data}")
+    return data if isinstance(data, list) else []
+
+
+@app.get("/api/github/projects/columns/{column_id}/cards")
+async def list_column_cards(column_id: int):
+    """获取列中的卡片"""
+    status, data = github_api_get(f"/projects/columns/{column_id}/cards")
+    if status != 200:
+        raise HTTPException(status_code=status, detail=f"获取卡片列表失败: {data}")
+    return data if isinstance(data, list) else []
+
+
+# ──────────────────────────────────────────────
+# GitHub Checks API (v4.2.0)
+# ──────────────────────────────────────────────
+@app.get("/api/github/repos/{repo_name}/commits/{ref}/check-runs")
+async def list_check_runs(repo_name: str, ref: str):
+    """获取提交的 Check Runs"""
+    status, data = github_api_get(f"/repos/{GITHUB_USER}/{repo_name}/commits/{ref}/check-runs")
+    if status != 200:
+        raise HTTPException(status_code=status, detail=f"获取 Check Runs 失败: {data}")
+    return data
+
+
+@app.get("/api/github/repos/{repo_name}/commits/{ref}/check-suites")
+async def list_check_suites(repo_name: str, ref: str):
+    """获取提交的 Check Suites"""
+    status, data = github_api_get(f"/repos/{GITHUB_USER}/{repo_name}/commits/{ref}/check-suites")
+    if status != 200:
+        raise HTTPException(status_code=status, detail=f"获取 Check Suites 失败: {data}")
+    return data
+
+
+@app.get("/api/github/repos/{repo_name}/check-runs/{check_run_id}")
+async def get_check_run(repo_name: str, check_run_id: int):
+    """获取 Check Run 详情"""
+    status, data = github_api_get(f"/repos/{GITHUB_USER}/{repo_name}/check-runs/{check_run_id}")
+    if status != 200:
+        raise HTTPException(status_code=status, detail=f"获取 Check Run 详情失败: {data}")
+    return data
+
+
+@app.get("/api/github/repos/{repo_name}/check-runs/{check_run_id}/annotations")
+async def get_check_run_annotations(repo_name: str, check_run_id: int):
+    """获取 Check Run 注解"""
+    status, data = github_api_get(f"/repos/{GITHUB_USER}/{repo_name}/check-runs/{check_run_id}/annotations")
+    if status != 200:
+        raise HTTPException(status_code=status, detail=f"获取 Check Run 注解失败: {data}")
+    return data if isinstance(data, list) else []
+
+
+# ──────────────────────────────────────────────
+# GitHub Dependabot & Code Scanning API (v4.2.0)
+# ──────────────────────────────────────────────
+@app.get("/api/github/repos/{repo_name}/dependabot/alerts")
+async def list_dependabot_alerts(repo_name: str, state: str = Query("open", description="open/dismissed/fixed")):
+    """获取 Dependabot 告警列表"""
+    qs = urllib.parse.urlencode({"state": state})
+    status, data = github_api_get(f"/repos/{GITHUB_USER}/{repo_name}/dependabot/alerts?{qs}")
+    if status != 200:
+        raise HTTPException(status_code=status, detail=f"获取 Dependabot 告警失败: {data}")
+    return data if isinstance(data, list) else []
+
+
+@app.patch("/api/github/repos/{repo_name}/dependabot/alerts/{alert_number}")
+async def update_dependabot_alert(repo_name: str, alert_number: int, request: Request):
+    """更新 Dependabot 告警状态"""
+    body = await request.json()
+    status, data = github_api_patch(f"/repos/{GITHUB_USER}/{repo_name}/dependabot/alerts/{alert_number}", body)
+    if status != 200:
+        raise HTTPException(status_code=status, detail=f"更新 Dependabot 告警失败: {data}")
+    return data
+
+
+@app.get("/api/github/repos/{repo_name}/code-scanning/alerts")
+async def list_code_scanning_alerts(repo_name: str, state: str = Query("open", description="open/dismissed/fixed")):
+    """获取代码扫描告警列表"""
+    qs = urllib.parse.urlencode({"state": state})
+    status, data = github_api_get(f"/repos/{GITHUB_USER}/{repo_name}/code-scanning/alerts?{qs}")
+    if status != 200:
+        raise HTTPException(status_code=status, detail=f"获取代码扫描告警失败: {data}")
+    return data if isinstance(data, list) else []
+
+
+@app.get("/api/github/repos/{repo_name}/code-scanning/alerts/{alert_number}")
+async def get_code_scanning_alert(repo_name: str, alert_number: int):
+    """获取代码扫描告警详情"""
+    status, data = github_api_get(f"/repos/{GITHUB_USER}/{repo_name}/code-scanning/alerts/{alert_number}")
+    if status != 200:
+        raise HTTPException(status_code=status, detail=f"获取代码扫描告警详情失败: {data}")
+    return data
+
+
+# ──────────────────────────────────────────────
+# GitHub Actions Variables & Cache API (v4.2.0)
+# ──────────────────────────────────────────────
+@app.get("/api/github/repos/{repo_name}/actions/variables")
+async def list_variables(repo_name: str):
+    """获取 Actions Variables 列表"""
+    status, data = github_api_get(f"/repos/{GITHUB_USER}/{repo_name}/actions/variables")
+    if status != 200:
+        raise HTTPException(status_code=status, detail=f"获取 Variables 失败: {data}")
+    return data
+
+
+@app.get("/api/github/repos/{repo_name}/actions/variables/{name}")
+async def get_variable(repo_name: str, name: str):
+    """获取单个 Variable"""
+    status, data = github_api_get(f"/repos/{GITHUB_USER}/{repo_name}/actions/variables/{name}")
+    if status != 200:
+        raise HTTPException(status_code=status, detail=f"获取 Variable 失败: {data}")
+    return data
+
+
+@app.post("/api/github/repos/{repo_name}/actions/variables")
+async def create_variable(repo_name: str, request: Request):
+    """创建 Variable"""
+    body = await request.json()
+    status, data = github_api_post(f"/repos/{GITHUB_USER}/{repo_name}/actions/variables", body)
+    if status != 201:
+        raise HTTPException(status_code=status, detail=f"创建 Variable 失败: {data}")
+    return {"message": f"已创建 Variable"}
+
+
+@app.patch("/api/github/repos/{repo_name}/actions/variables/{name}")
+async def update_variable(repo_name: str, name: str, request: Request):
+    """更新 Variable"""
+    body = await request.json()
+    status, data = github_api_patch(f"/repos/{GITHUB_USER}/{repo_name}/actions/variables/{name}", body)
+    if status != 204:
+        raise HTTPException(status_code=status, detail=f"更新 Variable 失败: {data}")
+    return {"message": f"已更新 Variable {name}"}
+
+
+@app.delete("/api/github/repos/{repo_name}/actions/variables/{name}")
+async def delete_variable(repo_name: str, name: str):
+    """删除 Variable"""
+    status, data = github_api_delete(f"/repos/{GITHUB_USER}/{repo_name}/actions/variables/{name}")
+    if status != 204:
+        raise HTTPException(status_code=status, detail=f"删除 Variable 失败: {data}")
+    return {"message": f"已删除 Variable {name}"}
+
+
+@app.get("/api/github/repos/{repo_name}/actions/caches")
+async def list_caches(repo_name: str):
+    """获取 Actions 缓存列表"""
+    status, data = github_api_get(f"/repos/{GITHUB_USER}/{repo_name}/actions/caches")
+    if status != 200:
+        raise HTTPException(status_code=status, detail=f"获取缓存列表失败: {data}")
+    return data
+
+
+@app.delete("/api/github/repos/{repo_name}/actions/caches/{cache_id}")
+async def delete_cache(repo_name: str, cache_id: int):
+    """删除 Actions 缓存"""
+    status, data = github_api_delete(f"/repos/{GITHUB_USER}/{repo_name}/actions/caches/{cache_id}")
+    if status != 204:
+        raise HTTPException(status_code=status, detail=f"删除缓存失败: {data}")
+    return {"message": "已删除缓存"}
+
+
+@app.delete("/api/github/repos/{repo_name}/actions/caches")
+async def delete_all_caches(repo_name: str):
+    """删除仓库所有 Actions 缓存"""
+    status, data = github_api_delete(f"/repos/{GITHUB_USER}/{repo_name}/actions/caches")
+    if status != 204:
+        raise HTTPException(status_code=status, detail=f"删除所有缓存失败: {data}")
+    return {"message": "已删除所有缓存"}
+
+
+# ──────────────────────────────────────────────
+# GitHub Organizations & Teams API (v4.3.0)
+# ──────────────────────────────────────────────
+@app.get("/api/github/user/orgs")
+async def list_user_orgs(per_page: int = Query(30, ge=1, le=100)):
+    """获取用户所属组织列表"""
+    qs = urllib.parse.urlencode({"per_page": per_page})
+    status, data = github_api_get(f"/user/orgs?{qs}")
+    if status != 200:
+        raise HTTPException(status_code=status, detail=f"获取组织列表失败: {data}")
+    return [{"id": o.get("id", 0), "login": o.get("login", ""), "description": o.get("description", ""), "avatar_url": o.get("avatar_url", ""), "url": o.get("url", "")} for o in (data if isinstance(data, list) else [])]
+
+
+@app.get("/api/github/orgs/{org}/repos")
+async def list_org_repos(org: str, per_page: int = Query(30, ge=1, le=100)):
+    """获取组织仓库列表"""
+    qs = urllib.parse.urlencode({"per_page": per_page, "sort": "updated"})
+    status, data = github_api_get(f"/orgs/{org}/repos?{qs}")
+    if status != 200:
+        raise HTTPException(status_code=status, detail=f"获取组织仓库失败: {data}")
+    return [filter_repo_fields(r) for r in (data if isinstance(data, list) else [])]
+
+
+@app.get("/api/github/orgs/{org}/members")
+async def list_org_members(org: str, per_page: int = Query(30, ge=1, le=100)):
+    """获取组织成员列表"""
+    qs = urllib.parse.urlencode({"per_page": per_page})
+    status, data = github_api_get(f"/orgs/{org}/members?{qs}")
+    if status != 200:
+        raise HTTPException(status_code=status, detail=f"获取组织成员失败: {data}")
+    return [{"login": m.get("login", ""), "id": m.get("id", 0), "avatar_url": m.get("avatar_url", ""), "url": m.get("url", "")} for m in (data if isinstance(data, list) else [])]
+
+
+@app.get("/api/github/orgs/{org}/teams")
+async def list_org_teams(org: str, per_page: int = Query(30, ge=1, le=100)):
+    """获取组织团队列表"""
+    qs = urllib.parse.urlencode({"per_page": per_page})
+    status, data = github_api_get(f"/orgs/{org}/teams?{qs}")
+    if status != 200:
+        raise HTTPException(status_code=status, detail=f"获取团队列表失败: {data}")
+    return [{"id": t.get("id", 0), "name": t.get("name", ""), "slug": t.get("slug", ""), "description": t.get("description", ""), "privacy": t.get("privacy", ""), "members_count": t.get("members_count", 0), "repos_count": t.get("repos_count", 0)} for t in (data if isinstance(data, list) else [])]
+
+
+@app.get("/api/github/orgs/{org}/teams/{team_slug}/members")
+async def list_team_members(org: str, team_slug: str, per_page: int = Query(30, ge=1, le=100)):
+    """获取团队成员列表"""
+    qs = urllib.parse.urlencode({"per_page": per_page})
+    status, data = github_api_get(f"/orgs/{org}/teams/{team_slug}/members?{qs}")
+    if status != 200:
+        raise HTTPException(status_code=status, detail=f"获取团队成员失败: {data}")
+    return [{"login": m.get("login", ""), "id": m.get("id", 0), "avatar_url": m.get("avatar_url", ""), "role": m.get("role", "")} for m in (data if isinstance(data, list) else [])]
+
+
+@app.get("/api/github/orgs/{org}/teams/{team_slug}/repos")
+async def list_team_repos(org: str, team_slug: str, per_page: int = Query(30, ge=1, le=100)):
+    """获取团队仓库列表"""
+    qs = urllib.parse.urlencode({"per_page": per_page})
+    status, data = github_api_get(f"/orgs/{org}/teams/{team_slug}/repos?{qs}")
+    if status != 200:
+        raise HTTPException(status_code=status, detail=f"获取团队仓库失败: {data}")
+    return [filter_repo_fields(r) for r in (data if isinstance(data, list) else [])]
+
+
+# ──────────────────────────────────────────────
+# GitHub Environments API (v4.3.0)
+# ──────────────────────────────────────────────
+@app.get("/api/github/repos/{repo_name}/environments")
+async def list_environments(repo_name: str):
+    """获取仓库环境列表"""
+    status, data = github_api_get(f"/repos/{GITHUB_USER}/{repo_name}/environments")
+    if status != 200:
+        raise HTTPException(status_code=status, detail=f"获取环境列表失败: {data}")
+    return data
+
+
+@app.get("/api/github/repos/{repo_name}/environments/{environment_name}")
+async def get_environment(repo_name: str, environment_name: str):
+    """获取环境详情"""
+    status, data = github_api_get(f"/repos/{GITHUB_USER}/{repo_name}/environments/{environment_name}")
+    if status != 200:
+        raise HTTPException(status_code=status, detail=f"获取环境详情失败: {data}")
+    return data
+
+
+@app.put("/api/github/repos/{repo_name}/environments/{environment_name}")
+async def create_or_update_environment(repo_name: str, environment_name: str, request: Request):
+    """创建或更新环境"""
+    body = await request.json()
+    status, data = github_api_put(f"/repos/{GITHUB_USER}/{repo_name}/environments/{environment_name}", body)
+    if status != 200:
+        raise HTTPException(status_code=status, detail=f"创建/更新环境失败: {data}")
+    return data
+
+
+@app.delete("/api/github/repos/{repo_name}/environments/{environment_name}")
+async def delete_environment(repo_name: str, environment_name: str):
+    """删除环境"""
+    status, data = github_api_delete(f"/repos/{GITHUB_USER}/{repo_name}/environments/{environment_name}")
+    if status != 204:
+        raise HTTPException(status_code=status, detail=f"删除环境失败: {data}")
+    return {"message": f"已删除环境 {environment_name}"}
+
+
+# ──────────────────────────────────────────────
+# GitHub Pages API (v4.3.0)
+# ──────────────────────────────────────────────
+@app.get("/api/github/repos/{repo_name}/pages")
+async def get_pages_info(repo_name: str):
+    """获取 GitHub Pages 信息"""
+    status, data = github_api_get(f"/repos/{GITHUB_USER}/{repo_name}/pages")
+    if status == 404:
+        return {"enabled": False}
+    if status != 200:
+        raise HTTPException(status_code=status, detail=f"获取 Pages 信息失败: {data}")
+    return data
+
+
+@app.post("/api/github/repos/{repo_name}/pages")
+async def enable_pages(repo_name: str, request: Request):
+    """启用 GitHub Pages"""
+    body = await request.json()
+    status, data = github_api_post(f"/repos/{GITHUB_USER}/{repo_name}/pages", body)
+    if status != 201:
+        raise HTTPException(status_code=status, detail=f"启用 Pages 失败: {data}")
+    return data
+
+
+@app.delete("/api/github/repos/{repo_name}/pages")
+async def disable_pages(repo_name: str):
+    """禁用 GitHub Pages"""
+    status, data = github_api_delete(f"/repos/{GITHUB_USER}/{repo_name}/pages")
+    if status != 204:
+        raise HTTPException(status_code=status, detail=f"禁用 Pages 失败: {data}")
+    return {"message": "已禁用 GitHub Pages"}
+
+
+@app.get("/api/github/repos/{repo_name}/pages/builds")
+async def list_pages_builds(repo_name: str):
+    """获取 Pages 构建列表"""
+    status, data = github_api_get(f"/repos/{GITHUB_USER}/{repo_name}/pages/builds")
+    if status != 200:
+        raise HTTPException(status_code=status, detail=f"获取 Pages 构建列表失败: {data}")
+    return data if isinstance(data, list) else []
+
+
+# ──────────────────────────────────────────────
+# GitHub Packages API (v4.3.0)
+# ──────────────────────────────────────────────
+@app.get("/api/github/user/packages")
+async def list_user_packages(package_type: str = Query("npm", description="npm/maven/docker/rubygems/nuget"), per_page: int = Query(30, ge=1, le=100)):
+    """获取用户包列表"""
+    qs = urllib.parse.urlencode({"package_type": package_type, "per_page": per_page})
+    status, data = github_api_get(f"/user/packages?{qs}")
+    if status != 200:
+        raise HTTPException(status_code=status, detail=f"获取包列表失败: {data}")
+    return data if isinstance(data, list) else []
+
+
+@app.get("/api/github/repos/{repo_name}/packages")
+async def list_repo_packages(repo_name: str, package_type: str = Query("npm", description="npm/maven/docker/rubygems/nuget"), per_page: int = Query(30, ge=1, le=100)):
+    """获取仓库包列表"""
+    qs = urllib.parse.urlencode({"package_type": package_type, "per_page": per_page})
+    status, data = github_api_get(f"/repos/{GITHUB_USER}/{repo_name}/packages?{qs}")
+    if status != 200:
+        raise HTTPException(status_code=status, detail=f"获取仓库包列表失败: {data}")
+    return data if isinstance(data, list) else []
+
+
+@app.delete("/api/github/user/packages/{package_type}/{package_name}")
+async def delete_package(package_type: str, package_name: str):
+    """删除包"""
+    status, data = github_api_delete(f"/user/packages/{package_type}/{package_name}")
+    if status != 204:
+        raise HTTPException(status_code=status, detail=f"删除包失败: {data}")
+    return {"message": f"已删除包 {package_name}"}
+
+
+# ──────────────────────────────────────────────
+# GitHub Runners API (v4.3.0)
+# ──────────────────────────────────────────────
+@app.get("/api/github/repos/{repo_name}/actions/runners")
+async def list_runners(repo_name: str):
+    """获取仓库 Runner 列表"""
+    status, data = github_api_get(f"/repos/{GITHUB_USER}/{repo_name}/actions/runners")
+    if status != 200:
+        raise HTTPException(status_code=status, detail=f"获取 Runner 列表失败: {data}")
+    return data
+
+
+@app.get("/api/github/repos/{repo_name}/actions/runners/{runner_id}")
+async def get_runner(repo_name: str, runner_id: int):
+    """获取 Runner 详情"""
+    status, data = github_api_get(f"/repos/{GITHUB_USER}/{repo_name}/actions/runners/{runner_id}")
+    if status != 200:
+        raise HTTPException(status_code=status, detail=f"获取 Runner 详情失败: {data}")
+    return data
+
+
+@app.delete("/api/github/repos/{repo_name}/actions/runners/{runner_id}")
+async def delete_runner(repo_name: str, runner_id: int):
+    """删除 Runner"""
+    status, data = github_api_delete(f"/repos/{GITHUB_USER}/{repo_name}/actions/runners/{runner_id}")
+    if status != 204:
+        raise HTTPException(status_code=status, detail=f"删除 Runner 失败: {data}")
+    return {"message": f"已删除 Runner {runner_id}"}
+
+
+@app.get("/api/github/repos/{repo_name}/actions/runners/downloads")
+async def list_runner_downloads(repo_name: str):
+    """获取 Runner 下载链接"""
+    status, data = github_api_get(f"/repos/{GITHUB_USER}/{repo_name}/actions/runners/downloads")
+    if status != 200:
+        raise HTTPException(status_code=status, detail=f"获取 Runner 下载链接失败: {data}")
+    return data if isinstance(data, list) else []
+
+
+@app.post("/api/github/repos/{repo_name}/actions/runners/registration-token")
+async def create_runner_token(repo_name: str):
+    """创建 Runner 注册令牌"""
+    status, data = github_api_post(f"/repos/{GITHUB_USER}/{repo_name}/actions/runners/registration-token")
+    if status != 201:
+        raise HTTPException(status_code=status, detail=f"创建 Runner 令牌失败: {data}")
+    return data
+
+
+# ──────────────────────────────────────────────
+# GitHub Deployments API (v4.3.0)
+# ──────────────────────────────────────────────
+@app.get("/api/github/repos/{repo_name}/deployments")
+async def list_deployments(repo_name: str, per_page: int = Query(30, ge=1, le=100)):
+    """获取部署列表"""
+    qs = urllib.parse.urlencode({"per_page": per_page})
+    status, data = github_api_get(f"/repos/{GITHUB_USER}/{repo_name}/deployments?{qs}")
+    if status != 200:
+        raise HTTPException(status_code=status, detail=f"获取部署列表失败: {data}")
+    return data if isinstance(data, list) else []
+
+
+@app.post("/api/github/repos/{repo_name}/deployments")
+async def create_deployment(repo_name: str, request: Request):
+    """创建部署"""
+    body = await request.json()
+    status, data = github_api_post(f"/repos/{GITHUB_USER}/{repo_name}/deployments", body)
+    if status != 201:
+        raise HTTPException(status_code=status, detail=f"创建部署失败: {data}")
+    return data
+
+
+@app.get("/api/github/repos/{repo_name}/deployments/{deployment_id}/statuses")
+async def list_deployment_statuses(repo_name: str, deployment_id: int):
+    """获取部署状态列表"""
+    status, data = github_api_get(f"/repos/{GITHUB_USER}/{repo_name}/deployments/{deployment_id}/statuses")
+    if status != 200:
+        raise HTTPException(status_code=status, detail=f"获取部署状态失败: {data}")
+    return data if isinstance(data, list) else []
+
+
+@app.post("/api/github/repos/{repo_name}/deployments/{deployment_id}/statuses")
+async def create_deployment_status(repo_name: str, deployment_id: int, request: Request):
+    """创建部署状态"""
+    body = await request.json()
+    status, data = github_api_post(f"/repos/{GITHUB_USER}/{repo_name}/deployments/{deployment_id}/statuses", body)
+    if status != 201:
+        raise HTTPException(status_code=status, detail=f"创建部署状态失败: {data}")
+    return data
+
+
+# ──────────────────────────────────────────────
+# GitHub Git Data API (v4.3.0)
+# ──────────────────────────────────────────────
+@app.get("/api/github/repos/{repo_name}/git/trees/{sha}")
+async def get_tree(repo_name: str, sha: str, recursive: int = Query(1, description="1 for flat, 1 for recursive")):
+    """获取 Git Tree"""
+    qs = urllib.parse.urlencode({"recursive": recursive})
+    status, data = github_api_get(f"/repos/{GITHUB_USER}/{repo_name}/git/trees/{sha}?{qs}")
+    if status != 200:
+        raise HTTPException(status_code=status, detail=f"获取 Tree 失败: {data}")
+    return data
+
+
+@app.get("/api/github/repos/{repo_name}/git/blobs/{sha}")
+async def get_blob(repo_name: str, sha: str):
+    """获取 Git Blob"""
+    status, data = github_api_get(f"/repos/{GITHUB_USER}/{repo_name}/git/blobs/{sha}")
+    if status != 200:
+        raise HTTPException(status_code=status, detail=f"获取 Blob 失败: {data}")
+    return data
+
+
+@app.get("/api/github/repos/{repo_name}/git/refs")
+async def list_refs(repo_name: str):
+    """获取 Git 引用列表"""
+    status, data = github_api_get(f"/repos/{GITHUB_USER}/{repo_name}/git/refs")
+    if status != 200:
+        raise HTTPException(status_code=status, detail=f"获取引用列表失败: {data}")
+    return data if isinstance(data, list) else []
+
+
+@app.get("/api/github/repos/{repo_name}/git/commits/{sha}")
+async def get_git_commit(repo_name: str, sha: str):
+    """获取 Git Commit 对象"""
+    status, data = github_api_get(f"/repos/{GITHUB_USER}/{repo_name}/git/commits/{sha}")
+    if status != 200:
+        raise HTTPException(status_code=status, detail=f"获取 Git Commit 失败: {data}")
+    return data
 
 
 # ──────────────────────────────────────────────

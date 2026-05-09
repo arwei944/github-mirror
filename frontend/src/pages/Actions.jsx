@@ -178,6 +178,20 @@ export default function Actions({ githubRepos }) {
   const [newSecretKeyId, setNewSecretKeyId] = useState('')
   const [creatingSecret, setCreatingSecret] = useState(false)
   const [actionLoading, setActionLoading] = useState({})
+  // Variables state
+  const [variables, setVariables] = useState([])
+  const [variablesLoading, setVariablesLoading] = useState(false)
+  const [showCreateVariable, setShowCreateVariable] = useState(false)
+  const [newVarName, setNewVarName] = useState('')
+  const [newVarValue, setNewVarValue] = useState('')
+  const [creatingVariable, setCreatingVariable] = useState(false)
+  const [editingVariable, setEditingVariable] = useState(null)
+  const [editVarValue, setEditVarValue] = useState('')
+  const [savingVariable, setSavingVariable] = useState(false)
+  // Caches state
+  const [caches, setCaches] = useState([])
+  const [cachesLoading, setCachesLoading] = useState(false)
+  const [clearingCaches, setClearingCaches] = useState(false)
 
   const repoName = selectedRepo || (githubRepos.length > 0 ? githubRepos[0].name : '')
 
@@ -346,11 +360,102 @@ export default function Actions({ githubRepos }) {
     }
   }
 
+  // Variables functions
+  const loadVariables = useCallback(() => {
+    setVariablesLoading(true)
+    api.get(`/api/github/repos/${repoName}/actions/variables`)
+      .then(data => { setVariables(data?.variables || data || []); setVariablesLoading(false) })
+      .catch(() => { setVariables([]); setVariablesLoading(false) })
+  }, [repoName])
+
+  const handleCreateVariable = async () => {
+    if (!newVarName.trim() || !newVarValue.trim()) return
+    setCreatingVariable(true)
+    try {
+      await api.post(`/api/github/repos/${repoName}/actions/variables`, {
+        name: newVarName.trim(),
+        value: newVarValue.trim(),
+      })
+      setShowCreateVariable(false)
+      setNewVarName('')
+      setNewVarValue('')
+      loadVariables()
+    } catch (err) {
+      // ignore
+    } finally {
+      setCreatingVariable(false)
+    }
+  }
+
+  const handleEditVariable = (variable) => {
+    setEditingVariable(variable.name)
+    setEditVarValue('')
+  }
+
+  const handleSaveVariable = async (varName) => {
+    if (!editVarValue.trim()) return
+    setSavingVariable(true)
+    try {
+      await api.patch(`/api/github/repos/${repoName}/actions/variables/${varName}`, {
+        name: varName,
+        value: editVarValue.trim(),
+      })
+      setEditingVariable(null)
+      setEditVarValue('')
+      loadVariables()
+    } catch (err) {
+      // ignore
+    } finally {
+      setSavingVariable(false)
+    }
+  }
+
+  const handleDeleteVariable = async (varName) => {
+    if (!window.confirm(`确定要删除 Variable "${varName}" 吗？`)) return
+    try {
+      await api.del(`/api/github/repos/${repoName}/actions/variables/${varName}`)
+      setVariables(prev => prev.filter(v => v.name !== varName))
+    } catch (err) {
+      // ignore
+    }
+  }
+
+  // Caches functions
+  const loadCaches = useCallback(() => {
+    setCachesLoading(true)
+    api.get(`/api/github/repos/${repoName}/actions/caches`)
+      .then(data => { setCaches(data?.actions_caches || data || []); setCachesLoading(false) })
+      .catch(() => { setCaches([]); setCachesLoading(false) })
+  }, [repoName])
+
+  const handleClearAllCaches = async () => {
+    if (!window.confirm('确定要清除全部缓存吗？此操作不可撤销。')) return
+    setClearingCaches(true)
+    try {
+      await api.del(`/api/github/repos/${repoName}/actions/caches`)
+      setCaches([])
+    } catch (err) {
+      // ignore
+    } finally {
+      setClearingCaches(false)
+    }
+  }
+
+  useEffect(() => {
+    if (activeTab === 'variables' && variables.length === 0 && !variablesLoading) loadVariables()
+  }, [activeTab, variables.length, variablesLoading, loadVariables])
+
+  useEffect(() => {
+    if (activeTab === 'caches' && caches.length === 0 && !cachesLoading) loadCaches()
+  }, [activeTab, caches.length, cachesLoading, loadCaches])
+
   const tabItems = [
     { key: 'actions', label: 'Actions' },
     { key: 'releases', label: '发布' },
     { key: 'secrets', label: 'Secrets' },
     { key: 'artifacts', label: 'Artifacts' },
+    { key: 'variables', label: 'Variables' },
+    { key: 'caches', label: '缓存' },
   ]
 
   return (
@@ -407,6 +512,25 @@ export default function Actions({ githubRepos }) {
             {Icon.plus(13)} 新建 Secret
           </button>
         )}
+        {activeTab === 'variables' && (
+          <button
+            className="btn-primary"
+            onClick={() => { setShowCreateVariable(true); setNewVarName(''); setNewVarValue('') }}
+            style={{ display: 'flex', alignItems: 'center', gap: 4 }}
+          >
+            {Icon.plus(13)} 新建 Variable
+          </button>
+        )}
+        {activeTab === 'caches' && caches.length > 0 && (
+          <button
+            className="btn-secondary"
+            onClick={handleClearAllCaches}
+            disabled={clearingCaches}
+            style={{ display: 'flex', alignItems: 'center', gap: 4, color: 'var(--mac-red)' }}
+          >
+            {Icon.trash(13)} {clearingCaches ? '清除中...' : '清除全部缓存'}
+          </button>
+        )}
       </div>
 
       {/* Content */}
@@ -424,7 +548,127 @@ export default function Actions({ githubRepos }) {
                 <div style={{ fontSize: 14, fontWeight: 500 }}>暂无工作流运行记录</div>
                 <div style={{ fontSize: 12, marginTop: 4 }}>GitHub Actions 运行记录将在这里显示</div>
               </div>
+            ) : activeTab === 'variables' ? (
+            /* Variables Tab */
+            variablesLoading ? (
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: 200, color: 'var(--mac-text-secondary)', gap: 8 }}>
+                <span style={{ animation: 'pulse-dot 1s infinite' }}>&#9679;</span> 加载中...
+              </div>
+            ) : variables.length === 0 ? (
+              <div style={{ textAlign: 'center', padding: 64, color: 'var(--mac-text-secondary)' }}>
+                <div style={{ fontSize: 36, marginBottom: 8, display: 'flex', justifyContent: 'center' }}>{Icon.tag(36)}</div>
+                <div style={{ fontSize: 14, fontWeight: 500 }}>暂无 Variables</div>
+                <div style={{ fontSize: 12, marginTop: 4 }}>点击「新建 Variable」创建第一个变量</div>
+              </div>
             ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                {variables.map(variable => (
+                  <div key={variable.name} className="glass animate-fade-in" style={{ padding: '12px 16px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                      <span style={{ color: 'var(--mac-text-secondary)', flexShrink: 0 }}>{Icon.tag(16)}</span>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        {editingVariable === variable.name ? (
+                          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                            <input
+                              type="text"
+                              value={editVarValue}
+                              onChange={e => setEditVarValue(e.target.value)}
+                              placeholder="输入新值"
+                              style={{
+                                flex: 1, padding: '6px 12px', borderRadius: 8,
+                                border: '1px solid var(--mac-border)', background: 'var(--mac-bg)',
+                                fontSize: 13, color: 'var(--mac-text)', outline: 'none',
+                                fontFamily: 'monospace',
+                              }}
+                            />
+                            <button
+                              className="btn-primary"
+                              onClick={() => handleSaveVariable(variable.name)}
+                              disabled={savingVariable || !editVarValue.trim()}
+                              style={{ fontSize: 10, padding: '4px 10px', flexShrink: 0 }}
+                            >
+                              {savingVariable ? '...' : '保存'}
+                            </button>
+                            <button
+                              className="btn-secondary"
+                              onClick={() => { setEditingVariable(null); setEditVarValue('') }}
+                              style={{ fontSize: 10, padding: '4px 10px', flexShrink: 0 }}
+                            >
+                              取消
+                            </button>
+                          </div>
+                        ) : (
+                          <>
+                            <div style={{ fontSize: 13, fontWeight: 600 }}>{variable.name}</div>
+                            <div style={{ fontSize: 11, color: 'var(--mac-text-secondary)', marginTop: 2, fontFamily: 'monospace' }}>
+                              {'*'.repeat(8)}
+                            </div>
+                          </>
+                        )}
+                        {variable.updated_at && !editingVariable && (
+                          <div style={{ fontSize: 11, color: 'var(--mac-text-secondary)', marginTop: 2 }}>
+                            更新于 {timeAgo(variable.updated_at)}
+                          </div>
+                        )}
+                      </div>
+                      {editingVariable !== variable.name && (
+                        <>
+                          <button
+                            className="btn-secondary"
+                            onClick={() => handleEditVariable(variable)}
+                            style={{ fontSize: 10, padding: '2px 8px', flexShrink: 0 }}
+                          >
+                            {Icon.code(10)} 编辑
+                          </button>
+                          <button
+                            className="btn-secondary"
+                            onClick={() => handleDeleteVariable(variable.name)}
+                            style={{ fontSize: 10, padding: '2px 8px', color: 'var(--mac-red)', flexShrink: 0 }}
+                          >
+                            {Icon.trash(10)} 删除
+                          </button>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )
+          ) : activeTab === 'caches' ? (
+            /* Caches Tab */
+            cachesLoading ? (
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: 200, color: 'var(--mac-text-secondary)', gap: 8 }}>
+                <span style={{ animation: 'pulse-dot 1s infinite' }}>&#9679;</span> 加载中...
+              </div>
+            ) : caches.length === 0 ? (
+              <div style={{ textAlign: 'center', padding: 64, color: 'var(--mac-text-secondary)' }}>
+                <div style={{ fontSize: 36, marginBottom: 8, display: 'flex', justifyContent: 'center' }}>{Icon.folder(36)}</div>
+                <div style={{ fontSize: 14, fontWeight: 500 }}>暂无缓存</div>
+                <div style={{ fontSize: 12, marginTop: 4 }}>Actions 缓存将在这里显示</div>
+              </div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                {caches.map(cache => (
+                  <div key={cache.id} className="glass animate-fade-in" style={{ padding: '12px 16px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                      <span style={{ color: 'var(--mac-text-secondary)', flexShrink: 0 }}>{Icon.folder(16)}</span>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontSize: 13, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {cache.key}
+                        </div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 2, fontSize: 11, color: 'var(--mac-text-secondary)' }}>
+                          {cache.size_in_bytes !== undefined && (
+                            <span>{(cache.size_in_bytes / 1024 / 1024).toFixed(2)} MB</span>
+                          )}
+                          <span>{timeAgo(cache.created_at)}</span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )
+          ) : (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
                 {workflows.map(run => {
                   const statusInfo = getStatusInfo(run.status, run.conclusion)
@@ -740,6 +984,62 @@ export default function Actions({ githubRepos }) {
                 <button className="btn-secondary" onClick={() => setShowTriggerModal(false)}>取消</button>
                 <button className="btn-primary" onClick={handleTriggerWorkflow} disabled={!triggerRef.trim() || triggering}>
                   {triggering ? '触发中...' : '触发'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Create Variable Modal */}
+      {showCreateVariable && (
+        <div style={{
+          position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+          background: 'rgba(0,0,0,0.3)', display: 'flex', alignItems: 'center',
+          justifyContent: 'center', zIndex: 1000,
+        }} onClick={() => setShowCreateVariable(false)}>
+          <div className="glass animate-fade-in" style={{
+            width: 480, maxHeight: '80vh', overflowY: 'auto', padding: 20,
+          }} onClick={e => e.stopPropagation()}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
+              <h2 style={{ fontSize: 16, fontWeight: 600 }}>新建 Variable</h2>
+              <button className="btn-icon" onClick={() => setShowCreateVariable(false)}>{Icon.back(16)}</button>
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+              <div>
+                <label style={{ fontSize: 12, fontWeight: 500, color: 'var(--mac-text-secondary)', display: 'block', marginBottom: 4 }}>名称 *</label>
+                <input
+                  type="text"
+                  value={newVarName}
+                  onChange={e => setNewVarName(e.target.value)}
+                  placeholder="VARIABLE_NAME"
+                  style={{
+                    width: '100%', padding: '8px 12px', borderRadius: 8,
+                    border: '1px solid var(--mac-border)', background: 'var(--mac-bg)',
+                    fontSize: 13, color: 'var(--mac-text)', outline: 'none',
+                    fontFamily: 'monospace',
+                  }}
+                />
+              </div>
+              <div>
+                <label style={{ fontSize: 12, fontWeight: 500, color: 'var(--mac-text-secondary)', display: 'block', marginBottom: 4 }}>值 *</label>
+                <textarea
+                  value={newVarValue}
+                  onChange={e => setNewVarValue(e.target.value)}
+                  placeholder="变量值"
+                  rows={3}
+                  style={{
+                    width: '100%', padding: '8px 12px', borderRadius: 8,
+                    border: '1px solid var(--mac-border)', background: 'var(--mac-bg)',
+                    fontSize: 13, color: 'var(--mac-text)', outline: 'none',
+                    resize: 'vertical', fontFamily: 'monospace',
+                  }}
+                />
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 4 }}>
+                <button className="btn-secondary" onClick={() => setShowCreateVariable(false)}>取消</button>
+                <button className="btn-primary" onClick={handleCreateVariable} disabled={!newVarName.trim() || !newVarValue.trim() || creatingVariable}>
+                  {creatingVariable ? '创建中...' : '创建'}
                 </button>
               </div>
             </div>

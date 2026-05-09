@@ -13,6 +13,7 @@ import CodeBrowse from './pages/CodeBrowse'
 import Search from './pages/Search'
 import Profile from './pages/Profile'
 import Settings from './pages/Settings'
+import Security from './pages/Security'
 
 // ============ Icons ============
 const Icon = {
@@ -185,6 +186,7 @@ export default function App() {
     { key: 'profile', label: '个人中心', icon: Icon.users(16) },
     { key: 'settings', label: '设置', icon: Icon.tag(16) },
     { key: 'activity', label: '活动流', icon: Icon.activity(16) },
+    { key: 'security', label: '安全中心', icon: Icon.zap(16) },
     { key: 'deploy', label: '部署管理', icon: Icon.deploy(16) },
   ]
 
@@ -281,6 +283,12 @@ export default function App() {
             onSelectRepo={handleSelectRepo}
           />
         )
+      case 'security':
+        return (
+          <Security
+            githubRepos={githubRepos}
+          />
+        )
       case 'deploy':
         return (
           <Deploy
@@ -304,7 +312,7 @@ export default function App() {
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <span style={{ color: 'var(--mac-text)' }}>{Icon.github(18)}</span>
             <span style={{ fontSize: 15, fontWeight: 600, letterSpacing: '-0.02em' }}>GitHub Mirror</span>
-            <span style={{ fontSize: 9, padding: '1px 6px', borderRadius: 8, background: 'var(--mac-accent)', color: 'white', fontWeight: 500 }}>v3.6</span>
+            <span style={{ fontSize: 9, padding: '1px 6px', borderRadius: 8, background: 'var(--mac-accent)', color: 'white', fontWeight: 500 }}>v4.3</span>
           </div>
         </div>
 
@@ -313,7 +321,7 @@ export default function App() {
           {navItems.map(item => (
             <div
               key={item.key}
-              className={`nav-item ${currentPage === item.key || (item.key === 'issues' && currentPage === 'issue-detail') || (item.key === 'pulls' && currentPage === 'pull-detail') || (item.key === 'profile' && currentPage === 'profile') ? 'active' : ''}`}
+              className={`nav-item ${currentPage === item.key || (item.key === 'issues' && currentPage === 'issue-detail') || (item.key === 'pulls' && currentPage === 'pull-detail') || (item.key === 'profile' && currentPage === 'profile') || (item.key === 'security' && currentPage === 'security') ? 'active' : ''}`}
               onClick={() => navigateTo(item.key)}
             >
               {item.icon}
