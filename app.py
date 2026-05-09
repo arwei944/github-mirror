@@ -1200,6 +1200,8 @@ async def ping_webhook(repo_name: str, hook_id: int):
 # ──────────────────────────────────────────────
 # GitHub Code Browse & Search API (v2.4.0)
 # ──────────────────────────────────────────────
+@app.get("/api/github/repos/{repo_name}/contents")
+@app.get("/api/github/repos/{repo_name}/contents/")
 @app.get("/api/github/repos/{repo_name}/contents/{path:path}")
 async def get_repo_contents(repo_name: str, path: str = "", ref: str = Query("", description="分支名或 SHA")):
     """获取仓库文件/目录内容"""
