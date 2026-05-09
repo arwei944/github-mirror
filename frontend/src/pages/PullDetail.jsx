@@ -93,6 +93,8 @@ export default function PullDetail({ repoName, pullNumber, onBack }) {
   const [editReviewBody, setEditReviewBody] = useState('')
   const [savingReviewEdit, setSavingReviewEdit] = useState(false)
   const [updatingBranch, setUpdatingBranch] = useState(false)
+  const [autoMerge, setAutoMerge] = useState(null)
+  const [autoMergeLoading, setAutoMergeLoading] = useState(false)
 
   const loadPR = () => {
     setLoading(true)
@@ -230,6 +232,17 @@ export default function PullDetail({ repoName, pullNumber, onBack }) {
     }
   }
 
+  const loadAutoMerge = useCallback(() => {
+    setAutoMergeLoading(true)
+    api.get(`/api/github/repos/${repoName}/pulls/${pullNumber}/auto-merge`)
+      .then(data => { setAutoMerge(data || null); setAutoMergeLoading(false) })
+      .catch(() => { setAutoMerge(null); setAutoMergeLoading(false) })
+  }, [repoName, pullNumber])
+
+  useEffect(() => {
+    if (tab === 'auto-merge') loadAutoMerge()
+  }, [tab, loadAutoMerge])
+
   if (loading) {
     return (
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: 'var(--mac-text-secondary)', gap: 8 }}>
@@ -256,6 +269,7 @@ export default function PullDetail({ repoName, pullNumber, onBack }) {
     { key: 'reviews', label: `审查 (${reviews.length})` },
     { key: 'review-comments', label: '审查评论' },
     { key: 'conversation', label: `评论 (${comments.length})` },
+    { key: 'auto-merge', label: '自动合并' },
   ]
 
   return (
@@ -651,6 +665,92 @@ export default function PullDetail({ repoName, pullNumber, onBack }) {
                   </button>
                 </div>
               </div>
+            </div>
+          )}
+
+          {/* Auto-merge tab */}
+          {tab === 'auto-merge' && (
+            <div>
+              {autoMergeLoading ? (
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: 100, color: 'var(--mac-text-secondary)', gap: 8 }}>
+                  <span style={{ animation: 'pulse-dot 1s infinite' }}>&#9679;</span> 加载中...
+                </div>
+              ) : autoMerge && autoMerge.enabled ? (
+                <div className="glass" style={{ padding: 16 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+                    <span style={{
+                      fontSize: 12, padding: '2px 10px', borderRadius: 10, fontWeight: 600,
+                      background: 'rgba(52,199,89,0.12)', color: 'var(--mac-green)',
+                    }}>
+                      已启用
+                    </span>
+                    <span style={{ fontSize: 13, color: 'var(--mac-text)' }}>
+                      合并方式: {autoMerge.merge_method || 'merge'}
+                    </span>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                    <button
+                      className="btn-secondary"
+                      onClick={async () => {
+                        if (!window.confirm('确定要禁用自动合并吗？')) return
+                        try {
+                          await api.del(`/api/github/repos/${repoName}/pulls/${pullNumber}/auto-merge`)
+                          setAutoMerge(null)
+                        } catch (err) {
+                          // ignore
+                        }
+                      }}
+                      style={{ fontSize: 12, padding: '4px 12px', color: 'var(--mac-red)' }}
+                    >
+                      {Icon.delete(13)} 禁用
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div className="glass" style={{ padding: 16 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+                    <span style={{
+                      fontSize: 12, padding: '2px 10px', borderRadius: 10, fontWeight: 600,
+                      background: 'var(--mac-gray)', color: 'var(--mac-text-secondary)',
+                    }}>
+                      未启用
+                    </span>
+                    <span style={{ fontSize: 13, color: 'var(--mac-text)' }}>
+                      自动合并尚未启用
+                    </span>
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, justifyContent: 'flex-end' }}>
+                    <select
+                      id="auto-merge-method"
+                      defaultValue="merge"
+                      style={{
+                        padding: '4px 8px', borderRadius: 6, border: '1px solid var(--mac-border)',
+                        background: 'var(--mac-bg)', fontSize: 12, color: 'var(--mac-text)',
+                        outline: 'none', cursor: 'pointer',
+                      }}
+                    >
+                      <option value="merge">合并</option>
+                      <option value="squash">压缩合并</option>
+                      <option value="rebase">变基合并</option>
+                    </select>
+                    <button
+                      className="btn-primary"
+                      onClick={async () => {
+                        const method = document.getElementById('auto-merge-method').value
+                        try {
+                          await api.put(`/api/github/repos/${repoName}/pulls/${pullNumber}/auto-merge`, { merge_method: method })
+                          loadAutoMerge()
+                        } catch (err) {
+                          // ignore
+                        }
+                      }}
+                      style={{ fontSize: 12, padding: '4px 12px' }}
+                    >
+                      {Icon.gitBranch(13)} 启用
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </div>
