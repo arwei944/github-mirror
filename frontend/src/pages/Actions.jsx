@@ -364,7 +364,7 @@ export default function Actions({ githubRepos }) {
   const loadVariables = useCallback(() => {
     setVariablesLoading(true)
     api.get(`/api/github/repos/${repoName}/actions/variables`)
-      .then(data => { setVariables(data?.variables || data || []); setVariablesLoading(false) })
+      .then(data => { setVariables(Array.isArray(data?.variables) ? data.variables : (Array.isArray(data) ? data : [])); setVariablesLoading(false) })
       .catch(() => { setVariables([]); setVariablesLoading(false) })
   }, [repoName])
 
@@ -424,7 +424,7 @@ export default function Actions({ githubRepos }) {
   const loadCaches = useCallback(() => {
     setCachesLoading(true)
     api.get(`/api/github/repos/${repoName}/actions/caches`)
-      .then(data => { setCaches(data?.actions_caches || data || []); setCachesLoading(false) })
+      .then(data => { setCaches(Array.isArray(data?.actions_caches) ? data.actions_caches : (Array.isArray(data) ? data : [])); setCachesLoading(false) })
       .catch(() => { setCaches([]); setCachesLoading(false) })
   }, [repoName])
 

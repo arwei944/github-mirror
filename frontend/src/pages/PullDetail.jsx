@@ -122,7 +122,7 @@ export default function PullDetail({ repoName, pullNumber, onBack }) {
   const loadReactions = useCallback(() => {
     setReactionsLoading(true)
     api.get(`/api/github/repos/${repoName}/issues/${pullNumber}/reactions`)
-      .then(data => { setReactions(data || []); setReactionsLoading(false) })
+      .then(data => { setReactions(Array.isArray(data) ? data : []); setReactionsLoading(false) })
       .catch(() => { setReactions([]); setReactionsLoading(false) })
   }, [repoName, pullNumber])
 

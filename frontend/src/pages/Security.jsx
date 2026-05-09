@@ -71,7 +71,7 @@ export default function Security({ githubRepos }) {
     if (!repoName) return
     setLoading(true)
     api.get(`/api/github/repos/${repoName}/dependabot/alerts`)
-      .then(data => { setDependabotAlerts(data || []); setLoading(false) })
+      .then(data => { setDependabotAlerts(Array.isArray(data) ? data : []); setLoading(false) })
       .catch(() => { setDependabotAlerts([]); setLoading(false) })
   }, [repoName])
 
@@ -80,7 +80,7 @@ export default function Security({ githubRepos }) {
     if (!repoName) return
     setLoading(true)
     api.get(`/api/github/repos/${repoName}/code-scanning/alerts`)
-      .then(data => { setCodeScanningAlerts(data || []); setLoading(false) })
+      .then(data => { setCodeScanningAlerts(Array.isArray(data) ? data : []); setLoading(false) })
       .catch(() => { setCodeScanningAlerts([]); setLoading(false) })
   }, [repoName])
 
@@ -131,7 +131,7 @@ export default function Security({ githubRepos }) {
     setCheckLoading(true)
     try {
       const data = await api.get(`/api/github/repos/${repoName}/commits/${checkRef.trim()}/check-runs`)
-      setCheckRuns(data?.check_runs || data || [])
+      setCheckRuns(Array.isArray(data?.check_runs) ? data.check_runs : (Array.isArray(data) ? data : []))
     } catch (err) {
       setCheckRuns([])
     } finally {
