@@ -41,7 +41,7 @@ const FILTER_OPTIONS = [
   { key: 'archived', label: '已归档' },
 ]
 
-function RepoCard({ repo, isDeployed, config, lastDeploy, hfStatus, onSelect }) {
+function RepoCard({ repo, isDeployed, config, lastDeploy, hfStatus, onSelect, onDelete }) {
   const [hovered, setHovered] = useState(false)
 
   const handleStar = async (e) => {
@@ -152,6 +152,13 @@ function RepoCard({ repo, isDeployed, config, lastDeploy, hfStatus, onSelect }) 
           >
             {Icon.watch(11)} {repo.viewer_has_watched ? '取消关注' : 'Watch'}
           </button>
+          <button
+            onClick={(e) => onDelete(repo.name, e)}
+            className="btn-secondary"
+            style={{ display: 'flex', alignItems: 'center', gap: 3, fontSize: 10, padding: '3px 10px', color: 'var(--mac-red)', marginLeft: 'auto' }}
+          >
+            {Icon.trash(11)} 删除
+          </button>
         </div>
       )}
     </div>
@@ -162,6 +169,14 @@ export default function Repos({ githubRepos, projects, hfSpaces, onSelectRepo })
   const [sortBy, setSortBy] = useState('updated')
   const [filterBy, setFilterBy] = useState('all')
   const [search, setSearch] = useState('')
+  const [showCreateModal, setShowCreateModal] = useState(false)
+  const [createForm, setCreateForm] = useState({
+    name: '', description: '', homepage: '', private: false,
+    auto_init: true, has_issues: true, has_wiki: true, has_projects: true,
+  })
+  const [creating, setCreating] = useState(false)
+  const [createMessage, setCreateMessage] = useState('')
+  const [refreshKey, setRefreshKey] = useState(0)
 
   const projectMap = Object.fromEntries(projects.map(p => [p.name, p]))
   const getHfStatus = (name) => hfSpaces.find(s => s.name === name)?.stage || null
@@ -207,7 +222,38 @@ export default function Repos({ githubRepos, projects, hfSpaces, onSelectRepo })
     }
 
     return list
-  }, [githubRepos, filterBy, search, sortBy])
+  }, [githubRepos, filterBy, search, sortBy, refreshKey])
+
+  const handleCreateRepo = async () => {
+    if (!createForm.name.trim()) return
+    setCreating(true)
+    setCreateMessage('')
+    try {
+      await api.post('/api/github/repos', createForm)
+      setCreateMessage('创建成功')
+      setShowCreateModal(false)
+      setCreateForm({
+        name: '', description: '', homepage: '', private: false,
+        auto_init: true, has_issues: true, has_wiki: true, has_projects: true,
+      })
+      setRefreshKey(k => k + 1)
+    } catch (err) {
+      setCreateMessage('创建失败: ' + (err.message || '未知错误'))
+    } finally {
+      setCreating(false)
+    }
+  }
+
+  const handleDeleteRepo = async (repoName, e) => {
+    e.stopPropagation()
+    if (!window.confirm(`确定要删除仓库 "${repoName}" 吗？此操作不可撤销。`)) return
+    try {
+      await api.del('/api/github/repos/' + repoName)
+      setRefreshKey(k => k + 1)
+    } catch (err) {
+      // ignore
+    }
+  }
 
   return (
     <div>
@@ -259,6 +305,15 @@ export default function Repos({ githubRepos, projects, hfSpaces, onSelectRepo })
             {Icon.search(13)}
           </span>
         </div>
+
+        {/* New repo button */}
+        <button
+          className="btn-primary"
+          onClick={() => setShowCreateModal(true)}
+          style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 12, padding: '4px 12px', whiteSpace: 'nowrap' }}
+        >
+          {Icon.plus(13)} 新建仓库
+        </button>
       </div>
 
       {/* Card Grid */}
@@ -274,6 +329,7 @@ export default function Repos({ githubRepos, projects, hfSpaces, onSelectRepo })
                 lastDeploy={projectMap[repo.name]?.last_deploy}
                 hfStatus={getHfStatus(repo.name)}
                 onSelect={onSelectRepo}
+                onDelete={handleDeleteRepo}
               />
             ))}
           </div>
@@ -286,6 +342,137 @@ export default function Repos({ githubRepos, projects, hfSpaces, onSelectRepo })
           )}
         </div>
       </div>
+
+      {/* Create repo modal */}
+      {showCreateModal && (
+        <div
+          className="animate-fade-in"
+          style={{
+            position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000,
+            backdropFilter: 'blur(8px)',
+          }}
+          onClick={() => setShowCreateModal(false)}
+        >
+          <div
+            className="glass"
+            style={{
+              width: 480, maxHeight: '80vh', overflow: 'auto',
+              padding: 24, display: 'flex', flexDirection: 'column', gap: 16,
+            }}
+            onClick={e => e.stopPropagation()}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <span style={{ fontSize: 16, fontWeight: 600 }}>新建仓库</span>
+              <button className="btn-icon" onClick={() => setShowCreateModal(false)}>{Icon.back(14)}</button>
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+              <label style={{ fontSize: 12, fontWeight: 500, color: 'var(--mac-text-secondary)' }}>仓库名称 *</label>
+              <input
+                type="text"
+                value={createForm.name}
+                onChange={e => setCreateForm({ ...createForm, name: e.target.value })}
+                placeholder="my-awesome-project"
+                style={{
+                  padding: '6px 12px', borderRadius: 'var(--mac-radius)', border: '1px solid var(--mac-border)',
+                  background: 'var(--mac-bg)', color: 'var(--mac-text)', fontSize: 13, outline: 'none',
+                }}
+              />
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+              <label style={{ fontSize: 12, fontWeight: 500, color: 'var(--mac-text-secondary)' }}>描述</label>
+              <textarea
+                value={createForm.description}
+                onChange={e => setCreateForm({ ...createForm, description: e.target.value })}
+                placeholder="仓库描述..."
+                rows={2}
+                style={{
+                  padding: '6px 12px', borderRadius: 'var(--mac-radius)', border: '1px solid var(--mac-border)',
+                  background: 'var(--mac-bg)', color: 'var(--mac-text)', fontSize: 13, outline: 'none',
+                  resize: 'vertical', fontFamily: 'inherit',
+                }}
+              />
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+              <label style={{ fontSize: 12, fontWeight: 500, color: 'var(--mac-text-secondary)' }}>主页</label>
+              <input
+                type="text"
+                value={createForm.homepage}
+                onChange={e => setCreateForm({ ...createForm, homepage: e.target.value })}
+                placeholder="https://example.com"
+                style={{
+                  padding: '6px 12px', borderRadius: 'var(--mac-radius)', border: '1px solid var(--mac-border)',
+                  background: 'var(--mac-bg)', color: 'var(--mac-text)', fontSize: 13, outline: 'none',
+                }}
+              />
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8, padding: '8px 0' }}>
+              {[
+                { key: 'private', label: '私有仓库' },
+                { key: 'auto_init', label: '初始化 README' },
+                { key: 'has_issues', label: 'Issues' },
+                { key: 'has_wiki', label: 'Wiki' },
+                { key: 'has_projects', label: 'Projects' },
+              ].map(item => (
+                <div key={item.key} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <span style={{ fontSize: 13, color: 'var(--mac-text)', minWidth: 100 }}>{item.label}</span>
+                  <button
+                    onClick={() => setCreateForm({ ...createForm, [item.key]: !createForm[item.key] })}
+                    style={{
+                      width: 36, height: 20, borderRadius: 10, border: 'none', cursor: 'pointer',
+                      background: createForm[item.key] ? 'var(--mac-green)' : 'var(--mac-gray)',
+                      position: 'relative', transition: 'background 0.2s',
+                    }}
+                  >
+                    <span style={{
+                      position: 'absolute', top: 2,
+                      left: createForm[item.key] ? 18 : 2,
+                      width: 16, height: 16, borderRadius: 8,
+                      background: 'white', transition: 'left 0.2s',
+                      boxShadow: '0 1px 3px rgba(0,0,0,0.2)',
+                    }} />
+                  </button>
+                  <span style={{ fontSize: 11, color: 'var(--mac-text-secondary)' }}>
+                    {createForm[item.key] ? '开启' : '关闭'}
+                  </span>
+                </div>
+              ))}
+            </div>
+
+            {createMessage && (
+              <div style={{
+                fontSize: 12, padding: '6px 12px', borderRadius: 'var(--mac-radius)',
+                background: createMessage.includes('失败') ? 'rgba(255,59,48,0.1)' : 'rgba(52,199,89,0.1)',
+                color: createMessage.includes('失败') ? 'var(--mac-red)' : 'var(--mac-green)',
+              }}>
+                {createMessage}
+              </div>
+            )}
+
+            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+              <button
+                className="btn-secondary"
+                onClick={() => { setShowCreateModal(false); setCreateMessage('') }}
+                style={{ fontSize: 13, padding: '6px 16px' }}
+              >
+                取消
+              </button>
+              <button
+                className="btn-primary"
+                onClick={handleCreateRepo}
+                disabled={creating || !createForm.name.trim()}
+                style={{ fontSize: 13, padding: '6px 16px' }}
+              >
+                {creating ? '创建中...' : '创建仓库'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

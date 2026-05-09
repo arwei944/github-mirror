@@ -20,7 +20,7 @@ from fastapi import FastAPI, Query, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 
-__version__ = "2.4.0"
+__version__ = "2.5.0"
 
 app = FastAPI(
     version=__version__,
@@ -1014,6 +1014,187 @@ async def list_tags(repo_name: str, per_page: int = Query(30, ge=1, le=100)):
     if not isinstance(data, list):
         return []
     return [{"name": t.get("name", ""), "commit": {"sha": t.get("commit", {}).get("sha", "")}, "zipball_url": t.get("zipball_url", ""), "tarball_url": t.get("tarball_url", "")} for t in data]
+
+
+# ──────────────────────────────────────────────
+# GitHub Repository CRUD API (v2.5.0)
+# ──────────────────────────────────────────────
+@app.post("/api/github/repos")
+async def create_repository(request: Request):
+    """创建新仓库"""
+    if not GITHUB_TOKEN:
+        raise HTTPException(status_code=500, detail="未配置 GITHUB_TOKEN")
+    body = await request.json()
+    data = {
+        "name": body.get("name", ""),
+        "description": body.get("description", ""),
+        "homepage": body.get("homepage", ""),
+        "private": body.get("private", False),
+        "auto_init": body.get("auto_init", False),
+        "has_issues": body.get("has_issues", True),
+        "has_projects": body.get("has_projects", True),
+        "has_wiki": body.get("has_wiki", True),
+    }
+    if body.get("gitignore_template"):
+        data["gitignore_template"] = body["gitignore_template"]
+    if body.get("license_template"):
+        data["license_template"] = body["license_template"]
+    status, result = github_api_post("/user/repos", data=data)
+    if status == 201:
+        return filter_repo_fields(result)
+    raise HTTPException(status_code=status, detail=f"创建仓库失败: {result}")
+
+
+@app.delete("/api/github/repos/{repo_name}")
+async def delete_repository(repo_name: str):
+    """删除仓库"""
+    if not GITHUB_TOKEN:
+        raise HTTPException(status_code=500, detail="未配置 GITHUB_TOKEN")
+    status, data = github_api_delete(f"/repos/{GITHUB_USER}/{repo_name}")
+    if status == 204:
+        return JSONResponse(status_code=204, content=None)
+    raise HTTPException(status_code=status, detail=f"删除仓库失败: {data}")
+
+
+@app.patch("/api/github/repos/{repo_name}/settings")
+async def update_repository_settings(repo_name: str, request: Request):
+    """更新仓库设置"""
+    if not GITHUB_TOKEN:
+        raise HTTPException(status_code=500, detail="未配置 GITHUB_TOKEN")
+    body = await request.json()
+    data = {}
+    for key in ["name", "description", "homepage", "private", "visibility", "default_branch",
+                 "has_issues", "has_projects", "has_wiki", "is_template", "archived",
+                 "allow_squash_merge", "allow_merge_commit", "allow_rebase_merge", "delete_branch_on_merge"]:
+        if key in body:
+            data[key] = body[key]
+    status, result = github_request(f"/repos/{GITHUB_USER}/{repo_name}", method="PATCH", data=data)
+    if status == 200:
+        return filter_repo_fields(result)
+    raise HTTPException(status_code=status, detail=f"更新仓库设置失败: {result}")
+
+
+@app.put("/api/github/repos/{repo_name}/topics")
+async def update_repository_topics(repo_name: str, request: Request):
+    """更新仓库 Topics"""
+    if not GITHUB_TOKEN:
+        raise HTTPException(status_code=500, detail="未配置 GITHUB_TOKEN")
+    body = await request.json()
+    status, result = github_api_put(
+        f"/repos/{GITHUB_USER}/{repo_name}/topics",
+        data={"names": body.get("names", [])},
+        headers={"Accept": "application/vnd.github+json"}
+    )
+    if status == 200:
+        return result
+    raise HTTPException(status_code=status, detail=f"更新 Topics 失败: {result}")
+
+
+# ──────────────────────────────────────────────
+# GitHub File Read/Write API (v2.5.0)
+# ──────────────────────────────────────────────
+@app.put("/api/github/repos/{repo_name}/contents/{path:path}")
+async def create_or_update_file(repo_name: str, path: str, request: Request):
+    """创建或更新文件"""
+    if not GITHUB_TOKEN:
+        raise HTTPException(status_code=500, detail="未配置 GITHUB_TOKEN")
+    import base64
+    body = await request.json()
+    content = body.get("content", "")
+    encoded = base64.b64encode(content.encode("utf-8")).decode("utf-8")
+    data = {
+        "message": body.get("message", f"Update {path}"),
+        "content": encoded,
+    }
+    if body.get("sha"):
+        data["sha"] = body["sha"]
+    if body.get("branch"):
+        data["branch"] = body["branch"]
+    if body.get("committer"):
+        data["committer"] = body["committer"]
+    status, result = github_api_put(f"/repos/{GITHUB_USER}/{repo_name}/contents/{path}", data=data)
+    if status in (200, 201):
+        return result
+    raise HTTPException(status_code=status, detail=f"文件操作失败: {result}")
+
+
+@app.delete("/api/github/repos/{repo_name}/contents/{path:path}")
+async def delete_file(repo_name: str, path: str, request: Request):
+    """删除文件"""
+    if not GITHUB_TOKEN:
+        raise HTTPException(status_code=500, detail="未配置 GITHUB_TOKEN")
+    body = await request.json()
+    data = {
+        "message": body.get("message", f"Delete {path}"),
+        "sha": body.get("sha", ""),
+    }
+    if body.get("branch"):
+        data["branch"] = body["branch"]
+    status, result = github_api_delete(f"/repos/{GITHUB_USER}/{repo_name}/contents/{path}", data=data)
+    if status == 200:
+        return result
+    raise HTTPException(status_code=status, detail=f"删除文件失败: {result}")
+
+
+# ──────────────────────────────────────────────
+# GitHub Webhooks API (v2.5.0)
+# ──────────────────────────────────────────────
+@app.get("/api/github/repos/{repo_name}/hooks")
+async def list_webhooks(repo_name: str):
+    """获取仓库 Webhook 列表"""
+    if not GITHUB_TOKEN:
+        raise HTTPException(status_code=500, detail="未配置 GITHUB_TOKEN")
+    status, data = github_api_get(f"/repos/{GITHUB_USER}/{repo_name}/hooks?per_page=100")
+    if status != 200:
+        raise HTTPException(status_code=status, detail=f"获取 Webhooks 失败: {data}")
+    if not isinstance(data, list):
+        return []
+    return [{"id": h.get("id"), "name": h.get("name", ""), "url": h.get("config", {}).get("url", ""), "active": h.get("active", False), "events": h.get("events", []), "created_at": h.get("created_at", ""), "updated_at": h.get("updated_at", "")} for h in data]
+
+
+@app.post("/api/github/repos/{repo_name}/hooks")
+async def create_webhook(repo_name: str, request: Request):
+    """创建 Webhook"""
+    if not GITHUB_TOKEN:
+        raise HTTPException(status_code=500, detail="未配置 GITHUB_TOKEN")
+    body = await request.json()
+    data = {
+        "name": "web",
+        "config": {
+            "url": body.get("url", ""),
+            "content_type": body.get("content_type", "json"),
+        },
+        "events": body.get("events", ["push"]),
+        "active": body.get("active", True),
+    }
+    if body.get("secret"):
+        data["config"]["secret"] = body["secret"]
+    status, result = github_api_post(f"/repos/{GITHUB_USER}/{repo_name}/hooks", data=data)
+    if status == 201:
+        return result
+    raise HTTPException(status_code=status, detail=f"创建 Webhook 失败: {result}")
+
+
+@app.delete("/api/github/repos/{repo_name}/hooks/{hook_id}")
+async def delete_webhook(repo_name: str, hook_id: int):
+    """删除 Webhook"""
+    if not GITHUB_TOKEN:
+        raise HTTPException(status_code=500, detail="未配置 GITHUB_TOKEN")
+    status, data = github_api_delete(f"/repos/{GITHUB_USER}/{repo_name}/hooks/{hook_id}")
+    if status == 204:
+        return JSONResponse(status_code=204, content=None)
+    raise HTTPException(status_code=status, detail=f"删除 Webhook 失败: {data}")
+
+
+@app.post("/api/github/repos/{repo_name}/hooks/{hook_id}/ping")
+async def ping_webhook(repo_name: str, hook_id: int):
+    """触发 Webhook ping"""
+    if not GITHUB_TOKEN:
+        raise HTTPException(status_code=500, detail="未配置 GITHUB_TOKEN")
+    status, result = github_api_post(f"/repos/{GITHUB_USER}/{repo_name}/hooks/{hook_id}/pings")
+    if status == 204:
+        return JSONResponse(status_code=204, content=None)
+    raise HTTPException(status_code=status, detail=f"Ping Webhook 失败: {result}")
 
 
 # ──────────────────────────────────────────────
