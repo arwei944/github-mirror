@@ -20,7 +20,7 @@ from fastapi import FastAPI, Query, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 
-__version__ = "2.5.0"
+__version__ = "3.4.0"
 
 app = FastAPI(
     version=__version__,
@@ -1014,6 +1014,628 @@ async def list_tags(repo_name: str, per_page: int = Query(30, ge=1, le=100)):
     if not isinstance(data, list):
         return []
     return [{"name": t.get("name", ""), "commit": {"sha": t.get("commit", {}).get("sha", "")}, "zipball_url": t.get("zipball_url", ""), "tarball_url": t.get("tarball_url", "")} for t in data]
+
+
+# ──────────────────────────────────────────────
+# GitHub Issues Complete API (v3.1.0)
+# ──────────────────────────────────────────────
+@app.put("/api/github/repos/{repo_name}/issues/{issue_number}/lock")
+async def lock_issue(repo_name: str, issue_number: int, request: Request):
+    """锁定 Issue"""
+    if not GITHUB_TOKEN:
+        raise HTTPException(status_code=500, detail="未配置 GITHUB_TOKEN")
+    body = await request.json()
+    data = {"lock_reason": body.get("lock_reason", "resolved")}
+    status, result = github_api_put(f"/repos/{GITHUB_USER}/{repo_name}/issues/{issue_number}/lock", data=data)
+    if status == 204:
+        return JSONResponse(status_code=204, content=None)
+    raise HTTPException(status_code=status, detail=f"锁定失败: {result}")
+
+
+@app.delete("/api/github/repos/{repo_name}/issues/{issue_number}/lock")
+async def unlock_issue(repo_name: str, issue_number: int):
+    """解锁 Issue"""
+    if not GITHUB_TOKEN:
+        raise HTTPException(status_code=500, detail="未配置 GITHUB_TOKEN")
+    status, result = github_api_delete(f"/repos/{GITHUB_USER}/{repo_name}/issues/{issue_number}/lock")
+    if status == 204:
+        return JSONResponse(status_code=204, content=None)
+    raise HTTPException(status_code=status, detail=f"解锁失败: {result}")
+
+
+@app.patch("/api/github/repos/{repo_name}/issues/comments/{comment_id}")
+async def update_issue_comment(repo_name: str, comment_id: int, request: Request):
+    """更新 Issue 评论"""
+    if not GITHUB_TOKEN:
+        raise HTTPException(status_code=500, detail="未配置 GITHUB_TOKEN")
+    body = await request.json()
+    status, result = github_request(f"/repos/{GITHUB_USER}/{repo_name}/issues/comments/{comment_id}", method="PATCH", data={"body": body.get("body", "")})
+    if status == 200:
+        return result
+    raise HTTPException(status_code=status, detail=f"更新评论失败: {result}")
+
+
+@app.delete("/api/github/repos/{repo_name}/issues/comments/{comment_id}")
+async def delete_issue_comment(repo_name: str, comment_id: int):
+    """删除 Issue 评论"""
+    if not GITHUB_TOKEN:
+        raise HTTPException(status_code=500, detail="未配置 GITHUB_TOKEN")
+    status, result = github_api_delete(f"/repos/{GITHUB_USER}/{repo_name}/issues/comments/{comment_id}")
+    if status == 204:
+        return JSONResponse(status_code=204, content=None)
+    raise HTTPException(status_code=status, detail=f"删除评论失败: {result}")
+
+
+@app.patch("/api/github/repos/{repo_name}/labels/{label_name}")
+async def update_label(repo_name: str, label_name: str, request: Request):
+    """更新标签"""
+    if not GITHUB_TOKEN:
+        raise HTTPException(status_code=500, detail="未配置 GITHUB_TOKEN")
+    body = await request.json()
+    data = {}
+    if "new_name" in body:
+        data["new_name"] = body["new_name"]
+    if "color" in body:
+        data["color"] = body["color"]
+    if "description" in body:
+        data["description"] = body["description"]
+    status, result = github_request(f"/repos/{GITHUB_USER}/{repo_name}/labels/{label_name}", method="PATCH", data=data)
+    if status == 200:
+        return result
+    raise HTTPException(status_code=status, detail=f"更新标签失败: {result}")
+
+
+@app.delete("/api/github/repos/{repo_name}/labels/{label_name}")
+async def delete_label(repo_name: str, label_name: str):
+    """删除标签"""
+    if not GITHUB_TOKEN:
+        raise HTTPException(status_code=500, detail="未配置 GITHUB_TOKEN")
+    status, result = github_api_delete(f"/repos/{GITHUB_USER}/{repo_name}/labels/{label_name}")
+    if status == 204:
+        return JSONResponse(status_code=204, content=None)
+    raise HTTPException(status_code=status, detail=f"删除标签失败: {result}")
+
+
+@app.patch("/api/github/repos/{repo_name}/milestones/{milestone_number}")
+async def update_milestone(repo_name: str, milestone_number: int, request: Request):
+    """更新里程碑"""
+    if not GITHUB_TOKEN:
+        raise HTTPException(status_code=500, detail="未配置 GITHUB_TOKEN")
+    body = await request.json()
+    data = {}
+    for key in ["title", "description", "state", "due_on"]:
+        if key in body:
+            data[key] = body[key]
+    status, result = github_request(f"/repos/{GITHUB_USER}/{repo_name}/milestones/{milestone_number}", method="PATCH", data=data)
+    if status == 200:
+        return result
+    raise HTTPException(status_code=status, detail=f"更新里程碑失败: {result}")
+
+
+@app.delete("/api/github/repos/{repo_name}/milestones/{milestone_number}")
+async def delete_milestone(repo_name: str, milestone_number: int):
+    """删除里程碑"""
+    if not GITHUB_TOKEN:
+        raise HTTPException(status_code=500, detail="未配置 GITHUB_TOKEN")
+    status, result = github_api_delete(f"/repos/{GITHUB_USER}/{repo_name}/milestones/{milestone_number}")
+    if status == 204:
+        return JSONResponse(status_code=204, content=None)
+    raise HTTPException(status_code=status, detail=f"删除里程碑失败: {result}")
+
+
+@app.get("/api/github/repos/{repo_name}/issues/{issue_number}/timeline")
+async def get_issue_timeline(repo_name: str, issue_number: int):
+    """获取 Issue 时间线事件"""
+    if not GITHUB_TOKEN:
+        raise HTTPException(status_code=500, detail="未配置 GITHUB_TOKEN")
+    status, data = github_api_get(f"/repos/{GITHUB_USER}/{repo_name}/issues/{issue_number}/timeline?per_page=100", headers={"Accept": "application/vnd.github.mockingbird-preview+json"})
+    if status != 200:
+        raise HTTPException(status_code=status, detail=f"获取时间线失败: {data}")
+    if not isinstance(data, list):
+        return []
+    events = []
+    for e in data:
+        events.append({
+            "event": e.get("event", ""),
+            "actor": e.get("actor", {}).get("login", "") if e.get("actor") else "",
+            "created_at": e.get("created_at", ""),
+            "commit_id": e.get("commit_id", ""),
+            "commit_url": e.get("commit_url", ""),
+            "label": {"name": e.get("label", {}).get("name", ""), "color": e.get("label", {}).get("color", "")} if e.get("label") else None,
+            "assignee": e.get("assignee", {}).get("login", "") if e.get("assignee") else None,
+            "milestone": {"title": e.get("milestone", {}).get("title", "")} if e.get("milestone") else None,
+            "source": {"issue": {"number": e.get("source", {}).get("issue", {}).get("number")}} if e.get("source") else None,
+            "body": e.get("body", ""),
+        })
+    return events
+
+
+# ──────────────────────────────────────────────
+# GitHub Pull Requests Complete API (v3.2.0)
+# ──────────────────────────────────────────────
+@app.patch("/api/github/repos/{repo_name}/pulls/{pull_number}")
+async def update_pull_request(repo_name: str, pull_number: int, request: Request):
+    """更新 PR（标题、正文、状态）"""
+    if not GITHUB_TOKEN:
+        raise HTTPException(status_code=500, detail="未配置 GITHUB_TOKEN")
+    body = await request.json()
+    data = {}
+    for key in ["title", "body", "state", "base"]:
+        if key in body:
+            data[key] = body[key]
+    status, result = github_request(f"/repos/{GITHUB_USER}/{repo_name}/pulls/{pull_number}", method="PATCH", data=data)
+    if status == 200:
+        return result
+    raise HTTPException(status_code=status, detail=f"更新 PR 失败: {result}")
+
+
+@app.get("/api/github/repos/{repo_name}/pulls/{pull_number}/comments")
+async def list_pull_request_comments(repo_name: str, pull_number: int):
+    """获取 PR 评论列表"""
+    if not GITHUB_TOKEN:
+        raise HTTPException(status_code=500, detail="未配置 GITHUB_TOKEN")
+    status, data = github_api_get(f"/repos/{GITHUB_USER}/{repo_name}/pulls/{pull_number}/comments?per_page=100")
+    if status != 200:
+        raise HTTPException(status_code=status, detail=f"获取 PR 评论失败: {data}")
+    if not isinstance(data, list):
+        return []
+    return [{"id": c.get("id"), "body": c.get("body", "") or "", "path": c.get("path", ""), "position": c.get("position"), "original_position": c.get("original_position"), "diff_hunk": c.get("diff_hunk", ""), "user": {"login": c.get("user", {}).get("login", ""), "avatar_url": c.get("user", {}).get("avatar_url", "")} if c.get("user") else {}, "created_at": c.get("created_at", ""), "in_reply_to_id": c.get("in_reply_to_id")} for c in data]
+
+
+@app.post("/api/github/repos/{repo_name}/pulls/{pull_number}/comments")
+async def create_pull_request_comment(repo_name: str, pull_number: int, request: Request):
+    """创建 PR 评论"""
+    if not GITHUB_TOKEN:
+        raise HTTPException(status_code=500, detail="未配置 GITHUB_TOKEN")
+    body = await request.json()
+    data = {"body": body.get("body", "")}
+    if body.get("commit_id"):
+        data["commit_id"] = body["commit_id"]
+    if body.get("path"):
+        data["path"] = body["path"]
+    if body.get("position") is not None:
+        data["position"] = body["position"]
+    if body.get("side"):
+        data["side"] = body["side"]
+    if body.get("start_side"):
+        data["start_side"] = body["start_side"]
+    if body.get("start_line"):
+        data["start_line"] = body["start_line"]
+    if body.get("line"):
+        data["line"] = body["line"]
+    if body.get("in_reply_to"):
+        data["in_reply_to"] = body["in_reply_to"]
+    status, result = github_api_post(f"/repos/{GITHUB_USER}/{repo_name}/pulls/{pull_number}/comments", data=data)
+    if status == 201:
+        return result
+    raise HTTPException(status_code=status, detail=f"创建 PR 评论失败: {result}")
+
+
+@app.patch("/api/github/repos/{repo_name}/pulls/comments/{comment_id}")
+async def update_pull_request_comment(repo_name: str, comment_id: int, request: Request):
+    """更新 PR 评论"""
+    if not GITHUB_TOKEN:
+        raise HTTPException(status_code=500, detail="未配置 GITHUB_TOKEN")
+    body = await request.json()
+    status, result = github_request(f"/repos/{GITHUB_USER}/{repo_name}/pulls/comments/{comment_id}", method="PATCH", data={"body": body.get("body", "")})
+    if status == 200:
+        return result
+    raise HTTPException(status_code=status, detail=f"更新 PR 评论失败: {result}")
+
+
+@app.delete("/api/github/repos/{repo_name}/pulls/comments/{comment_id}")
+async def delete_pull_request_comment(repo_name: str, comment_id: int):
+    """删除 PR 评论"""
+    if not GITHUB_TOKEN:
+        raise HTTPException(status_code=500, detail="未配置 GITHUB_TOKEN")
+    status, result = github_api_delete(f"/repos/{GITHUB_USER}/{repo_name}/pulls/comments/{comment_id}")
+    if status == 204:
+        return JSONResponse(status_code=204, content=None)
+    raise HTTPException(status_code=status, detail=f"删除 PR 评论失败: {result}")
+
+
+@app.get("/api/github/repos/{repo_name}/pulls/{pull_number}/commits")
+async def list_pull_request_commits(repo_name: str, pull_number: int):
+    """获取 PR 提交列表"""
+    if not GITHUB_TOKEN:
+        raise HTTPException(status_code=500, detail="未配置 GITHUB_TOKEN")
+    status, data = github_api_get(f"/repos/{GITHUB_USER}/{repo_name}/pulls/{pull_number}/commits?per_page=100")
+    if status != 200:
+        raise HTTPException(status_code=status, detail=f"获取 PR 提交失败: {data}")
+    if not isinstance(data, list):
+        return []
+    return [{"sha": c.get("sha", ""), "message": c.get("commit", {}).get("message", ""), "author": {"name": c.get("commit", {}).get("author", {}).get("name", ""), "date": c.get("commit", {}).get("author", {}).get("date", "")}, "html_url": c.get("html_url", "")} for c in data]
+
+
+@app.post("/api/github/repos/{repo_name}/pulls/{pull_number}/requested_reviewers")
+async def request_reviewers(repo_name: str, pull_number: int, request: Request):
+    """请求审查者"""
+    if not GITHUB_TOKEN:
+        raise HTTPException(status_code=500, detail="未配置 GITHUB_TOKEN")
+    body = await request.json()
+    data = {}
+    if body.get("reviewers"):
+        data["reviewers"] = body["reviewers"]
+    if body.get("team_reviewers"):
+        data["team_reviewers"] = body["team_reviewers"]
+    status, result = github_api_post(f"/repos/{GITHUB_USER}/{repo_name}/pulls/{pull_number}/requested_reviewers", data=data)
+    if status == 201:
+        return result
+    raise HTTPException(status_code=status, detail=f"请求审查者失败: {result}")
+
+
+@app.delete("/api/github/repos/{repo_name}/pulls/{pull_number}/requested_reviewers")
+async def remove_requested_reviewers(repo_name: str, pull_number: int, request: Request):
+    """移除请求的审查者"""
+    if not GITHUB_TOKEN:
+        raise HTTPException(status_code=500, detail="未配置 GITHUB_TOKEN")
+    body = await request.json()
+    data = {}
+    if body.get("reviewers"):
+        data["reviewers"] = body["reviewers"]
+    if body.get("team_reviewers"):
+        data["team_reviewers"] = body["team_reviewers"]
+    status, result = github_api_delete(f"/repos/{GITHUB_USER}/{repo_name}/pulls/{pull_number}/requested_reviewers", data=data)
+    if status == 200:
+        return result
+    raise HTTPException(status_code=status, detail=f"移除审查者失败: {result}")
+
+
+@app.put("/api/github/repos/{repo_name}/pulls/{pull_number}/update-branch")
+async def update_pull_request_branch(repo_name: str, pull_number: int, request: Request = None):
+    """更新 PR 分支（同步上游）"""
+    if not GITHUB_TOKEN:
+        raise HTTPException(status_code=500, detail="未配置 GITHUB_TOKEN")
+    data = {"update_method": "merge"}
+    status, result = github_api_put(f"/repos/{GITHUB_USER}/{repo_name}/pulls/{pull_number}/update-branch", data=data)
+    if status == 202:
+        return {"message": "分支更新已触发", "result": result}
+    raise HTTPException(status_code=status, detail=f"更新分支失败: {result}")
+
+
+# ──────────────────────────────────────────────
+# GitHub Actions Operations API (v3.3.0)
+# ──────────────────────────────────────────────
+@app.post("/api/github/repos/{repo_name}/actions/workflows/{workflow_id}/dispatches")
+async def trigger_workflow(repo_name: str, workflow_id: str, request: Request):
+    """手动触发 Workflow"""
+    if not GITHUB_TOKEN:
+        raise HTTPException(status_code=500, detail="未配置 GITHUB_TOKEN")
+    body = await request.json()
+    data = {"ref": body.get("ref", "main")}
+    if body.get("inputs"):
+        data["inputs"] = body["inputs"]
+    status, result = github_api_post(f"/repos/{GITHUB_USER}/{repo_name}/actions/workflows/{workflow_id}/dispatches", data=data)
+    if status == 204:
+        return {"message": "Workflow 触发成功"}
+    raise HTTPException(status_code=status, detail=f"触发 Workflow 失败: {result}")
+
+
+@app.post("/api/github/repos/{repo_name}/actions/runs/{run_id}/cancel")
+async def cancel_workflow_run(repo_name: str, run_id: int):
+    """取消运行"""
+    if not GITHUB_TOKEN:
+        raise HTTPException(status_code=500, detail="未配置 GITHUB_TOKEN")
+    status, result = github_api_post(f"/repos/{GITHUB_USER}/{repo_name}/actions/runs/{run_id}/cancel")
+    if status == 202:
+        return {"message": "运行已取消"}
+    raise HTTPException(status_code=status, detail=f"取消运行失败: {result}")
+
+
+@app.post("/api/github/repos/{repo_name}/actions/runs/{run_id}/rerun")
+async def rerun_workflow(repo_name: str, run_id: int):
+    """重新运行"""
+    if not GITHUB_TOKEN:
+        raise HTTPException(status_code=500, detail="未配置 GITHUB_TOKEN")
+    status, result = github_api_post(f"/repos/{GITHUB_USER}/{repo_name}/actions/runs/{run_id}/rerun")
+    if status == 201:
+        return {"message": "重新运行已触发"}
+    raise HTTPException(status_code=status, detail=f"重新运行失败: {result}")
+
+
+@app.post("/api/github/repos/{repo_name}/actions/runs/{run_id}/rerun-failed")
+async def rerun_failed_jobs(repo_name: str, run_id: int):
+    """重新运行失败的 Jobs"""
+    if not GITHUB_TOKEN:
+        raise HTTPException(status_code=500, detail="未配置 GITHUB_TOKEN")
+    status, result = github_api_post(f"/repos/{GITHUB_USER}/{repo_name}/actions/runs/{run_id}/rerun-failed-jobs")
+    if status == 201:
+        return {"message": "失败任务重新运行已触发"}
+    raise HTTPException(status_code=status, detail=f"重新运行失败任务失败: {result}")
+
+
+@app.put("/api/github/repos/{repo_name}/actions/workflows/{workflow_id}/enable")
+async def enable_workflow(repo_name: str, workflow_id: str):
+    """启用 Workflow"""
+    if not GITHUB_TOKEN:
+        raise HTTPException(status_code=500, detail="未配置 GITHUB_TOKEN")
+    status, result = github_api_put(f"/repos/{GITHUB_USER}/{repo_name}/actions/workflows/{workflow_id}/enable")
+    if status == 204:
+        return {"message": "Workflow 已启用"}
+    raise HTTPException(status_code=status, detail=f"启用失败: {result}")
+
+
+@app.put("/api/github/repos/{repo_name}/actions/workflows/{workflow_id}/disable")
+async def disable_workflow(repo_name: str, workflow_id: str):
+    """禁用 Workflow"""
+    if not GITHUB_TOKEN:
+        raise HTTPException(status_code=500, detail="未配置 GITHUB_TOKEN")
+    status, result = github_api_put(f"/repos/{GITHUB_USER}/{repo_name}/actions/workflows/{workflow_id}/disable")
+    if status == 204:
+        return {"message": "Workflow 已禁用"}
+    raise HTTPException(status_code=status, detail=f"禁用失败: {result}")
+
+
+@app.get("/api/github/repos/{repo_name}/actions/runs/{run_id}/logs")
+async def get_workflow_run_logs(repo_name: str, run_id: int):
+    """获取运行日志（返回下载 URL）"""
+    if not GITHUB_TOKEN:
+        raise HTTPException(status_code=500, detail="未配置 GITHUB_TOKEN")
+    status, data = github_api_get(f"/repos/{GITHUB_USER}/{repo_name}/actions/runs/{run_id}/logs")
+    if status == 302:
+        return {"download_url": data}
+    elif status == 200:
+        return {"download_url": "日志已下载"}
+    raise HTTPException(status_code=status, detail=f"获取日志失败")
+
+
+@app.get("/api/github/repos/{repo_name}/actions/secrets")
+async def list_secrets(repo_name: str):
+    """获取仓库 Secrets 列表"""
+    if not GITHUB_TOKEN:
+        raise HTTPException(status_code=500, detail="未配置 GITHUB_TOKEN")
+    status, data = github_api_get(f"/repos/{GITHUB_USER}/{repo_name}/actions/secrets")
+    if status != 200:
+        raise HTTPException(status_code=status, detail=f"获取 Secrets 失败: {data}")
+    secrets = data.get("secrets", []) if isinstance(data, dict) else []
+    return [{"name": s.get("name", ""), "created_at": s.get("created_at", ""), "updated_at": s.get("updated_at", "")} for s in secrets]
+
+
+@app.get("/api/github/repos/{repo_name}/actions/secrets/public-key")
+async def get_secret_public_key(repo_name: str):
+    """获取仓库公钥（用于加密 Secret）"""
+    if not GITHUB_TOKEN:
+        raise HTTPException(status_code=500, detail="未配置 GITHUB_TOKEN")
+    status, data = github_api_get(f"/repos/{GITHUB_USER}/{repo_name}/actions/secrets/public-key")
+    if status == 200:
+        return {"key_id": data.get("key_id", ""), "key": data.get("key", "")}
+    raise HTTPException(status_code=status, detail=f"获取公钥失败: {data}")
+
+
+@app.put("/api/github/repos/{repo_name}/actions/secrets/{secret_name}")
+async def create_or_update_secret(repo_name: str, secret_name: str, request: Request):
+    """创建或更新 Secret"""
+    if not GITHUB_TOKEN:
+        raise HTTPException(status_code=500, detail="未配置 GITHUB_TOKEN")
+    body = await request.json()
+    data = {"key_id": body.get("key_id", ""), "encrypted_value": body.get("encrypted_value", "")}
+    status, result = github_api_put(f"/repos/{GITHUB_USER}/{repo_name}/actions/secrets/{secret_name}", data=data)
+    if status in (201, 204):
+        return {"message": f"Secret '{secret_name}' 已保存"}
+    raise HTTPException(status_code=status, detail=f"保存 Secret 失败: {result}")
+
+
+@app.delete("/api/github/repos/{repo_name}/actions/secrets/{secret_name}")
+async def delete_secret(repo_name: str, secret_name: str):
+    """删除 Secret"""
+    if not GITHUB_TOKEN:
+        raise HTTPException(status_code=500, detail="未配置 GITHUB_TOKEN")
+    status, result = github_api_delete(f"/repos/{GITHUB_USER}/{repo_name}/actions/secrets/{secret_name}")
+    if status == 204:
+        return JSONResponse(status_code=204, content=None)
+    raise HTTPException(status_code=status, detail=f"删除 Secret 失败: {result}")
+
+
+@app.get("/api/github/repos/{repo_name}/actions/artifacts")
+async def list_artifacts(repo_name: str):
+    """获取仓库 Artifacts 列表"""
+    if not GITHUB_TOKEN:
+        raise HTTPException(status_code=500, detail="未配置 GITHUB_TOKEN")
+    status, data = github_api_get(f"/repos/{GITHUB_USER}/{repo_name}/actions/artifacts")
+    if status != 200:
+        raise HTTPException(status_code=status, detail=f"获取 Artifacts 失败: {data}")
+    artifacts = data.get("artifacts", []) if isinstance(data, dict) else []
+    return [{"id": a.get("id"), "name": a.get("name", ""), "size_in_bytes": a.get("size_in_bytes", 0), "expired": a.get("expired", False), "created_at": a.get("created_at", ""), "archive_download_url": a.get("archive_download_url", "")} for a in artifacts]
+
+
+@app.delete("/api/github/repos/{repo_name}/actions/artifacts/{artifact_id}")
+async def delete_artifact(repo_name: str, artifact_id: int):
+    """删除 Artifact"""
+    if not GITHUB_TOKEN:
+        raise HTTPException(status_code=500, detail="未配置 GITHUB_TOKEN")
+    status, result = github_api_delete(f"/repos/{GITHUB_USER}/{repo_name}/actions/artifacts/{artifact_id}")
+    if status == 204:
+        return JSONResponse(status_code=204, content=None)
+    raise HTTPException(status_code=status, detail=f"删除 Artifact 失败: {result}")
+
+
+# ──────────────────────────────────────────────
+# GitHub Releases Complete API (v3.4.0)
+# ──────────────────────────────────────────────
+@app.get("/api/github/repos/{repo_name}/releases/latest")
+async def get_latest_release(repo_name: str):
+    """获取最新 Release"""
+    if not GITHUB_TOKEN:
+        raise HTTPException(status_code=500, detail="未配置 GITHUB_TOKEN")
+    status, data = github_api_get(f"/repos/{GITHUB_USER}/{repo_name}/releases/latest")
+    if status != 200:
+        raise HTTPException(status_code=status, detail=f"获取最新 Release 失败: {data}")
+    return {"id": data.get("id"), "tag_name": data.get("tag_name", ""), "name": data.get("name", ""), "body": data.get("body", "") or "", "draft": data.get("draft", False), "prerelease": data.get("prerelease", False), "created_at": data.get("created_at", ""), "published_at": data.get("published_at", ""), "html_url": data.get("html_url", ""), "assets": [{"name": a.get("name", ""), "size": a.get("size", 0), "download_url": a.get("browser_download_url", "")} for a in (data.get("assets") or [])]}
+
+
+@app.get("/api/github/repos/{repo_name}/releases/{release_id}")
+async def get_release(repo_name: str, release_id: int):
+    """获取 Release 详情"""
+    if not GITHUB_TOKEN:
+        raise HTTPException(status_code=500, detail="未配置 GITHUB_TOKEN")
+    status, data = github_api_get(f"/repos/{GITHUB_USER}/{repo_name}/releases/{release_id}")
+    if status != 200:
+        raise HTTPException(status_code=status, detail=f"获取 Release 详情失败: {data}")
+    return {"id": data.get("id"), "tag_name": data.get("tag_name", ""), "name": data.get("name", ""), "body": data.get("body", "") or "", "draft": data.get("draft", False), "prerelease": data.get("prerelease", False), "created_at": data.get("created_at", ""), "published_at": data.get("published_at", ""), "html_url": data.get("html_url", ""), "assets": [{"name": a.get("name", ""), "size": a.get("size", 0), "download_url": a.get("browser_download_url", "")} for a in (data.get("assets") or [])]}
+
+
+@app.patch("/api/github/repos/{repo_name}/releases/{release_id}")
+async def update_release(repo_name: str, release_id: int, request: Request):
+    """更新 Release"""
+    if not GITHUB_TOKEN:
+        raise HTTPException(status_code=500, detail="未配置 GITHUB_TOKEN")
+    body = await request.json()
+    data = {}
+    for key in ["tag_name", "name", "body", "draft", "prerelease", "target_commitish"]:
+        if key in body:
+            data[key] = body[key]
+    status, result = github_request(f"/repos/{GITHUB_USER}/{repo_name}/releases/{release_id}", method="PATCH", data=data)
+    if status == 200:
+        return result
+    raise HTTPException(status_code=status, detail=f"更新 Release 失败: {result}")
+
+
+@app.delete("/api/github/repos/{repo_name}/releases/{release_id}")
+async def delete_release(repo_name: str, release_id: int):
+    """删除 Release"""
+    if not GITHUB_TOKEN:
+        raise HTTPException(status_code=500, detail="未配置 GITHUB_TOKEN")
+    status, result = github_api_delete(f"/repos/{GITHUB_USER}/{repo_name}/releases/{release_id}")
+    if status == 204:
+        return JSONResponse(status_code=204, content=None)
+    raise HTTPException(status_code=status, detail=f"删除 Release 失败: {result}")
+
+
+# ──────────────────────────────────────────────
+# GitHub Branches Complete API (v3.4.0)
+# ──────────────────────────────────────────────
+@app.post("/api/github/repos/{repo_name}/branches")
+async def create_branch(repo_name: str, request: Request):
+    """创建分支"""
+    if not GITHUB_TOKEN:
+        raise HTTPException(status_code=500, detail="未配置 GITHUB_TOKEN")
+    body = await request.json()
+    branch_name = body.get("name", "")
+    from_sha = body.get("from", "main")
+    # Get the SHA of the source ref
+    _, ref_data = github_api_get(f"/repos/{GITHUB_USER}/{repo_name}/git/ref/heads/{from_sha}")
+    if not isinstance(ref_data, dict) or "object" not in ref_data:
+        raise HTTPException(status_code=404, detail=f"源分支 '{from_sha}' 不存在")
+    sha = ref_data["object"]["sha"]
+    status, result = github_api_post(f"/repos/{GITHUB_USER}/{repo_name}/git/refs", data={"ref": f"refs/heads/{branch_name}", "sha": sha})
+    if status == 201:
+        return {"name": branch_name, "sha": sha}
+    raise HTTPException(status_code=status, detail=f"创建分支失败: {result}")
+
+
+@app.delete("/api/github/repos/{repo_name}/branches/{branch_name}")
+async def delete_branch(repo_name: str, branch_name: str):
+    """删除分支"""
+    if not GITHUB_TOKEN:
+        raise HTTPException(status_code=500, detail="未配置 GITHUB_TOKEN")
+    status, result = github_api_delete(f"/repos/{GITHUB_USER}/{repo_name}/git/refs/heads/{branch_name}")
+    if status == 204:
+        return JSONResponse(status_code=204, content=None)
+    raise HTTPException(status_code=status, detail=f"删除分支失败: {result}")
+
+
+@app.post("/api/github/repos/{repo_name}/branches/{branch_name}/rename")
+async def rename_branch(repo_name: str, branch_name: str, request: Request):
+    """重命名分支"""
+    if not GITHUB_TOKEN:
+        raise HTTPException(status_code=500, detail="未配置 GITHUB_TOKEN")
+    body = await request.json()
+    status, result = github_api_post(f"/repos/{GITHUB_USER}/{repo_name}/branches/{branch_name}/rename", data={"new_name": body.get("new_name", "")})
+    if status == 200:
+        return result
+    raise HTTPException(status_code=status, detail=f"重命名分支失败: {result}")
+
+
+# ──────────────────────────────────────────────
+# GitHub Notifications Complete API (v3.4.0)
+# ──────────────────────────────────────────────
+@app.patch("/api/github/notifications/threads/{thread_id}")
+async def mark_notification_read(repo_name: str, thread_id: str, request: Request):
+    """标记通知已读"""
+    if not GITHUB_TOKEN:
+        raise HTTPException(status_code=500, detail="未配置 GITHUB_TOKEN")
+    body = await request.json() if hasattr(request, 'body') else {}
+    data = {}
+    if body.get("read") is not None:
+        data["read"] = body["read"]
+    status, result = github_request(f"/notifications/threads/{thread_id}", method="PATCH", data=data)
+    if status == 205:
+        return {"message": "通知已更新"}
+    raise HTTPException(status_code=status, detail=f"更新通知失败: {result}")
+
+
+@app.get("/api/github/repos/{repo_name}/notifications")
+async def list_repo_notifications(repo_name: str, all: bool = Query(False), page: int = Query(1, ge=1), per_page: int = Query(30, ge=1, le=100)):
+    """获取仓库通知"""
+    if not GITHUB_TOKEN:
+        raise HTTPException(status_code=500, detail="未配置 GITHUB_TOKEN")
+    qs = urllib.parse.urlencode({"all": str(all).lower(), "page": page, "per_page": per_page})
+    status, data = github_api_get(f"/repos/{GITHUB_USER}/{repo_name}/notifications?{qs}")
+    if status != 200:
+        raise HTTPException(status_code=status, detail=f"获取仓库通知失败: {data}")
+    if not isinstance(data, list):
+        return []
+    return [{"id": n.get("id"), "subject": {"title": n.get("subject", {}).get("title", ""), "type": n.get("subject", {}).get("type", ""), "url": n.get("subject", {}).get("url", "")}, "reason": n.get("reason", ""), "unread": n.get("unread", False), "updated_at": n.get("updated_at", ""), "repository": {"full_name": n.get("repository", {}).get("full_name", ""), "name": n.get("repository", {}).get("name", "")} if n.get("repository") else {}, "thread_id": n.get("id")} for n in data]
+
+
+# ──────────────────────────────────────────────
+# GitHub Commits API (v3.4.0)
+# ──────────────────────────────────────────────
+@app.get("/api/github/repos/{repo_name}/commits")
+async def list_commits(repo_name: str, sha: str = Query("", description="分支名或 SHA"), page: int = Query(1, ge=1), per_page: int = Query(30, ge=1, le=100)):
+    """获取仓库提交历史"""
+    if not GITHUB_TOKEN:
+        raise HTTPException(status_code=500, detail="未配置 GITHUB_TOKEN")
+    qs = urllib.parse.urlencode({"page": page, "per_page": per_page})
+    ref = sha if sha else "main"
+    status, data = github_api_get(f"/repos/{GITHUB_USER}/{repo_name}/commits?sha={ref}&{qs}")
+    if status != 200:
+        raise HTTPException(status_code=status, detail=f"获取提交历史失败: {data}")
+    if not isinstance(data, list):
+        return []
+    return [{"sha": c.get("sha", "")[:7], "sha_full": c.get("sha", ""), "message": c.get("commit", {}).get("message", "").split("\n")[0], "author": {"name": c.get("commit", {}).get("author", {}).get("name", ""), "date": c.get("commit", {}).get("author", {}).get("date", ""), "avatar_url": c.get("author", {}).get("avatar_url", "")} if c.get("author") else {}, "html_url": c.get("html_url", "")} for c in data]
+
+
+@app.get("/api/github/repos/{repo_name}/commits/{ref}")
+async def get_commit_detail(repo_name: str, ref: str):
+    """获取提交详情"""
+    if not GITHUB_TOKEN:
+        raise HTTPException(status_code=500, detail="未配置 GITHUB_TOKEN")
+    status, data = github_api_get(f"/repos/{GITHUB_USER}/{repo_name}/commits/{ref}")
+    if status != 200:
+        raise HTTPException(status_code=status, detail=f"获取提交详情失败: {data}")
+    return {"sha": data.get("sha", ""), "message": data.get("commit", {}).get("message", ""), "author": {"name": data.get("commit", {}).get("author", {}).get("name", ""), "date": data.get("commit", {}).get("author", {}).get("date", "")}, "stats": {"additions": data.get("stats", {}).get("additions", 0), "deletions": data.get("stats", {}).get("deletions", 0), "total": data.get("stats", {}).get("total", 0)}, "files": [{"filename": f.get("filename", ""), "status": f.get("status", ""), "additions": f.get("additions", 0), "deletions": f.get("deletions", 0), "patch": f.get("patch", "")} for f in (data.get("files") or [])], "html_url": data.get("html_url", "")}
+
+
+# ──────────────────────────────────────────────
+# GitHub Search Extended API (v3.4.0)
+# ──────────────────────────────────────────────
+@app.get("/api/github/search/issues")
+async def search_issues(q: str = Query(..., description="搜索关键词"), per_page: int = Query(30, ge=1, le=100)):
+    """搜索 Issues 和 PR"""
+    if not GITHUB_TOKEN:
+        raise HTTPException(status_code=500, detail="未配置 GITHUB_TOKEN")
+    scoped_q = f"{q} user:{GITHUB_USER}"
+    qs = urllib.parse.urlencode({"q": scoped_q, "per_page": per_page})
+    status, data = github_api_get(f"/search/issues?{qs}")
+    if status != 200:
+        raise HTTPException(status_code=status, detail=f"搜索失败: {data}")
+    items = data.get("items", []) if isinstance(data, dict) else []
+    return {"total_count": data.get("total_count", 0), "items": [{"id": i.get("id"), "number": i.get("number"), "title": i.get("title", ""), "state": i.get("state", ""), "html_url": i.get("html_url", ""), "repository_url": i.get("repository_url", ""), "labels": [{"name": l.get("name", ""), "color": l.get("color", "")} for l in (i.get("labels") or [])], "created_at": i.get("created_at", ""), "updated_at": i.get("updated_at", "")} for i in items]}
+
+
+@app.get("/api/github/search/commits")
+async def search_commits(q: str = Query(..., description="搜索关键词"), per_page: int = Query(30, ge=1, le=100)):
+    """搜索 Commits"""
+    if not GITHUB_TOKEN:
+        raise HTTPException(status_code=500, detail="未配置 GITHUB_TOKEN")
+    scoped_q = f"{q} user:{GITHUB_USER}"
+    qs = urllib.parse.urlencode({"q": scoped_q, "per_page": per_page})
+    status, data = github_api_get(f"/search/commits?{qs}", headers={"Accept": "application/vnd.github.cloak-preview+json"})
+    if status != 200:
+        raise HTTPException(status_code=status, detail=f"搜索失败: {data}")
+    items = data.get("items", []) if isinstance(data, dict) else []
+    return {"total_count": data.get("total_count", 0), "items": [{"sha": i.get("sha", "")[:7], "sha_full": i.get("sha", ""), "message": i.get("commit", {}).get("message", "").split("\n")[0], "author": i.get("commit", {}).get("author", {}).get("name", ""), "date": i.get("commit", {}).get("author", {}).get("date", ""), "html_url": i.get("html_url", "")} for i in items]}
 
 
 # ──────────────────────────────────────────────

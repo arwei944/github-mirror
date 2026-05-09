@@ -5,6 +5,8 @@ import api from '../api'
 const SEARCH_TYPES = [
   { key: 'repos', label: '仓库' },
   { key: 'code', label: '代码' },
+  { key: 'issues', label: 'Issues' },
+  { key: 'commits', label: '提交' },
 ]
 
 function highlightMatch(text, query) {
@@ -107,6 +109,87 @@ function CodeResult({ item, query }) {
   )
 }
 
+function IssueResult({ item, query }) {
+  const isOpen = item.state === 'open'
+  return (
+    <div className="glass animate-fade-in" style={{ padding: '12px 16px' }}>
+      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
+        <span style={{ color: isOpen ? 'var(--mac-green)' : 'var(--mac-red)', flexShrink: 0, marginTop: 2 }}>{Icon.issue(16)}</span>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <span style={{ fontSize: 13, fontWeight: 600 }}>
+              {highlightMatch(item.title, query)}
+            </span>
+            <span style={{
+              fontSize: 10, padding: '1px 7px', borderRadius: 10, fontWeight: 600,
+              background: isOpen ? 'rgba(52,199,89,0.12)' : 'rgba(255,59,48,0.12)',
+              color: isOpen ? 'var(--mac-green)' : 'var(--mac-red)',
+            }}>
+              {isOpen ? '待处理' : '已关闭'}
+            </span>
+          </div>
+          <div style={{ fontSize: 11, color: 'var(--mac-text-secondary)', marginTop: 2 }}>
+            <span>#{item.number}</span>
+            {item.repository_url && (
+              <span style={{ marginLeft: 8 }}>
+                in {item.repository_url.split('/').slice(-2).join('/')}
+              </span>
+            )}
+          </div>
+          {item.body && (
+            <div style={{
+              fontSize: 12, color: 'var(--mac-text-secondary)', marginTop: 4,
+              lineHeight: 1.4, display: '-webkit-box', WebkitLineClamp: 2,
+              WebkitBoxOrient: 'vertical', overflow: 'hidden',
+            }}>
+              {item.body.slice(0, 200)}
+            </div>
+          )}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 4, fontSize: 11, color: 'var(--mac-text-secondary)' }}>
+            {item.user && <span>{item.user.login}</span>}
+            {item.comments !== undefined && <span>{item.comments} 条评论</span>}
+            {item.updated_at && <span>更新于 {new Date(item.updated_at).toLocaleDateString('zh-CN')}</span>}
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function CommitResult({ item, query }) {
+  return (
+    <div className="glass animate-fade-in" style={{ padding: '12px 16px' }}>
+      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
+        <span style={{ color: 'var(--mac-text-secondary)', flexShrink: 0, marginTop: 2 }}>{Icon.commit(16)}</span>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <code style={{
+              fontSize: 12, fontFamily: 'monospace', padding: '1px 6px', borderRadius: 4,
+              background: 'var(--mac-gray)', color: 'var(--mac-accent)', flexShrink: 0,
+            }}>
+              {item.sha ? item.sha.slice(0, 7) : '?'}
+            </code>
+            <span style={{ fontSize: 12, fontWeight: 500, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {highlightMatch(item.commit?.message || item.message || '', query)}
+            </span>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 4, fontSize: 11, color: 'var(--mac-text-secondary)' }}>
+            {item.commit?.author?.name && <span>{item.commit.author.name}</span>}
+            {item.html_url && (
+              <span>
+                in {item.html_url.split('/').slice(-3, -1).join('/')}
+              </span>
+            )}
+            {item.commit?.author?.date && (
+              <span>{new Date(item.commit.author.date).toLocaleDateString('zh-CN')}</span>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 export default function Search({ githubRepos, onSelectRepo }) {
   const [query, setQuery] = useState('')
   const [searchType, setSearchType] = useState('repos')
@@ -128,6 +211,12 @@ export default function Search({ githubRepos, onSelectRepo }) {
           (r.language || '').toLowerCase().includes(q)
         )
         setResults(filtered)
+      } else if (searchType === 'issues') {
+        const data = await api.get(`/api/github/search/issues?q=${encodeURIComponent(query)}`).catch(() => [])
+        setResults(data?.items || data || [])
+      } else if (searchType === 'commits') {
+        const data = await api.get(`/api/github/search/commits?q=${encodeURIComponent(query)}`).catch(() => [])
+        setResults(data?.items || data || [])
       } else {
         // API search for code
         const data = await api.get(`/api/github/search/code?q=${encodeURIComponent(query)}`).catch(() => [])
@@ -180,7 +269,7 @@ export default function Search({ githubRepos, onSelectRepo }) {
             value={query}
             onChange={e => setQuery(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder={searchType === 'repos' ? '搜索仓库...' : '搜索代码...'}
+            placeholder={searchType === 'repos' ? '搜索仓库...' : searchType === 'issues' ? '搜索 Issues...' : searchType === 'commits' ? '搜索提交...' : '搜索代码...'}
             autoFocus
             style={{
               width: '100%', padding: '12px 16px 12px 40px', borderRadius: 12,
@@ -241,6 +330,14 @@ export default function Search({ githubRepos, onSelectRepo }) {
               {searchType === 'repos' ? (
                 results.map(repo => (
                   <RepoResult key={repo.name} repo={repo} query={query} onSelectRepo={onSelectRepo} />
+                ))
+              ) : searchType === 'issues' ? (
+                results.map((item, idx) => (
+                  <IssueResult key={item.id || idx} item={item} query={query} />
+                ))
+              ) : searchType === 'commits' ? (
+                results.map((item, idx) => (
+                  <CommitResult key={item.sha || idx} item={item} query={query} />
                 ))
               ) : (
                 results.map((item, idx) => (

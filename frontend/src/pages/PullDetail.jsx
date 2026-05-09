@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { Icon } from '../App'
 import api from '../api'
 
@@ -82,6 +82,17 @@ export default function PullDetail({ repoName, pullNumber, onBack }) {
   const [merging, setMerging] = useState(false)
   const [mergeMethod, setMergeMethod] = useState('merge')
   const [tab, setTab] = useState('details')
+  const [commits, setCommits] = useState([])
+  const [commitsLoading, setCommitsLoading] = useState(false)
+  const [reviewComments, setReviewComments] = useState([])
+  const [reviewCommentsLoading, setReviewCommentsLoading] = useState(false)
+  const [newReviewComment, setNewReviewComment] = useState('')
+  const [newReviewPath, setNewReviewPath] = useState('')
+  const [submittingReviewComment, setSubmittingReviewComment] = useState(false)
+  const [editingReviewId, setEditingReviewId] = useState(null)
+  const [editReviewBody, setEditReviewBody] = useState('')
+  const [savingReviewEdit, setSavingReviewEdit] = useState(false)
+  const [updatingBranch, setUpdatingBranch] = useState(false)
 
   const loadPR = () => {
     setLoading(true)
@@ -134,6 +145,91 @@ export default function PullDetail({ repoName, pullNumber, onBack }) {
     }
   }
 
+  const loadCommits = useCallback(() => {
+    setCommitsLoading(true)
+    api.get(`/api/github/repos/${repoName}/pulls/${pullNumber}/commits`)
+      .then(data => { setCommits(data || []); setCommitsLoading(false) })
+      .catch(() => { setCommits([]); setCommitsLoading(false) })
+  }, [repoName, pullNumber])
+
+  const loadReviewComments = useCallback(() => {
+    setReviewCommentsLoading(true)
+    api.get(`/api/github/repos/${repoName}/pulls/${pullNumber}/comments`)
+      .then(data => { setReviewComments(data || []); setReviewCommentsLoading(false) })
+      .catch(() => { setReviewComments([]); setReviewCommentsLoading(false) })
+  }, [repoName, pullNumber])
+
+  useEffect(() => {
+    if (tab === 'commits' && commits.length === 0 && !commitsLoading) loadCommits()
+  }, [tab, commits.length, commitsLoading, loadCommits])
+
+  useEffect(() => {
+    if (tab === 'review-comments' && reviewComments.length === 0 && !reviewCommentsLoading) loadReviewComments()
+  }, [tab, reviewComments.length, reviewCommentsLoading, loadReviewComments])
+
+  const handleSubmitReviewComment = async () => {
+    if (!newReviewComment.trim() || !newReviewPath.trim()) return
+    setSubmittingReviewComment(true)
+    try {
+      await api.post(`/api/github/repos/${repoName}/pulls/${pullNumber}/comments`, {
+        body: newReviewComment.trim(),
+        path: newReviewPath.trim(),
+        position: 1,
+      })
+      setNewReviewComment('')
+      setNewReviewPath('')
+      loadReviewComments()
+    } catch (err) {
+      // ignore
+    } finally {
+      setSubmittingReviewComment(false)
+    }
+  }
+
+  const handleEditReviewComment = (rc) => {
+    setEditingReviewId(rc.id)
+    setEditReviewBody(rc.body || '')
+  }
+
+  const handleSaveReviewEdit = async (commentId) => {
+    if (!editReviewBody.trim()) return
+    setSavingReviewEdit(true)
+    try {
+      await api.patch(`/api/github/repos/${repoName}/pulls/${pullNumber}/comments/${commentId}`, { body: editReviewBody.trim() })
+      setEditingReviewId(null)
+      setEditReviewBody('')
+      loadReviewComments()
+    } catch (err) {
+      // ignore
+    } finally {
+      setSavingReviewEdit(false)
+    }
+  }
+
+  const handleDeleteReviewComment = async (commentId) => {
+    if (!window.confirm('确定要删除这条审查评论吗？此操作不可撤销。')) return
+    try {
+      await api.del(`/api/github/repos/${repoName}/pulls/${pullNumber}/comments/${commentId}`)
+      setReviewComments(prev => prev.filter(c => c.id !== commentId))
+    } catch (err) {
+      // ignore
+    }
+  }
+
+  const handleUpdateBranch = async () => {
+    if (!pr) return
+    setUpdatingBranch(true)
+    try {
+      await api.put(`/api/github/repos/${repoName}/pulls/${pullNumber}/update-branch`)
+      const updated = await api.get(`/api/github/repos/${repoName}/pulls/${pullNumber}`)
+      if (updated) setPr(updated)
+    } catch (err) {
+      // ignore
+    } finally {
+      setUpdatingBranch(false)
+    }
+  }
+
   if (loading) {
     return (
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: 'var(--mac-text-secondary)', gap: 8 }}>
@@ -156,7 +252,9 @@ export default function PullDetail({ repoName, pullNumber, onBack }) {
   const tabs = [
     { key: 'details', label: '详情' },
     { key: 'files', label: `文件变更 (${changedFiles.length})` },
+    { key: 'commits', label: '提交' },
     { key: 'reviews', label: `审查 (${reviews.length})` },
+    { key: 'review-comments', label: '审查评论' },
     { key: 'conversation', label: `评论 (${comments.length})` },
   ]
 
@@ -191,6 +289,14 @@ export default function PullDetail({ repoName, pullNumber, onBack }) {
         {/* Merge controls */}
         {isOpen && (
           <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
+            <button
+              className="btn-secondary"
+              onClick={handleUpdateBranch}
+              disabled={updatingBranch}
+              style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, padding: '4px 12px' }}
+            >
+              {Icon.refresh(12)} {updatingBranch ? '更新中...' : '更新分支'}
+            </button>
             <select
               value={mergeMethod}
               onChange={e => setMergeMethod(e.target.value)}
@@ -337,6 +443,158 @@ export default function PullDetail({ repoName, pullNumber, onBack }) {
                     </div>
                   )
                 })}
+              </div>
+            )
+          )}
+
+          {/* Commits tab */}
+          {tab === 'commits' && (
+            commitsLoading ? (
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: 100, color: 'var(--mac-text-secondary)', gap: 8 }}>
+                <span style={{ animation: 'pulse-dot 1s infinite' }}>&#9679;</span> 加载提交中...
+              </div>
+            ) : commits.length === 0 ? (
+              <div style={{ textAlign: 'center', padding: 48, color: 'var(--mac-text-secondary)' }}>暂无提交记录</div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                {commits.map(commit => (
+                  <div key={commit.sha} className="glass" style={{ padding: '10px 14px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <span style={{ color: 'var(--mac-text-secondary)', flexShrink: 0 }}>{Icon.commit(14)}</span>
+                      <code style={{
+                        fontSize: 12, fontFamily: 'monospace', padding: '1px 6px', borderRadius: 4,
+                        background: 'var(--mac-gray)', color: 'var(--mac-accent)', flexShrink: 0,
+                      }}>
+                        {commit.sha ? commit.sha.slice(0, 7) : '?'}
+                      </code>
+                      <span style={{ fontSize: 12, fontWeight: 500, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {commit.commit?.message || commit.message || '无提交信息'}
+                      </span>
+                      <span style={{ fontSize: 11, color: 'var(--mac-text-secondary)', flexShrink: 0 }}>
+                        {timeAgo(commit.commit?.author?.date || commit.commit?.committer?.date)}
+                      </span>
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 4, marginLeft: 22, fontSize: 11, color: 'var(--mac-text-secondary)' }}>
+                      {commit.author && (
+                        <span style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
+                          {commit.author.avatar_url && <img src={commit.author.avatar_url} alt="" style={{ width: 14, height: 14, borderRadius: '50%' }} />}
+                          {commit.author.login || commit.commit?.author?.name}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )
+          )}
+
+          {/* Review Comments tab */}
+          {tab === 'review-comments' && (
+            reviewCommentsLoading ? (
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: 100, color: 'var(--mac-text-secondary)', gap: 8 }}>
+                <span style={{ animation: 'pulse-dot 1s infinite' }}>&#9679;</span> 加载审查评论中...
+              </div>
+            ) : (
+              <div>
+                {reviewComments.length > 0 && (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 16 }}>
+                    {reviewComments.map(rc => (
+                      <div key={rc.id} className="glass" style={{ padding: 14 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                          {rc.user && rc.user.avatar_url && (
+                            <img src={rc.user.avatar_url} alt="" style={{ width: 20, height: 20, borderRadius: '50%' }} />
+                          )}
+                          <span style={{ fontSize: 12, fontWeight: 600 }}>{rc.user?.login || '未知用户'}</span>
+                          {rc.path && (
+                            <code style={{ fontSize: 11, fontFamily: 'monospace', padding: '1px 5px', borderRadius: 4, background: 'var(--mac-gray)', color: 'var(--mac-text-secondary)' }}>
+                              {rc.path}
+                            </code>
+                          )}
+                          {rc.position !== undefined && (
+                            <span style={{ fontSize: 10, color: 'var(--mac-text-secondary)' }}>行 {rc.position}</span>
+                          )}
+                          <span style={{ fontSize: 11, color: 'var(--mac-text-secondary)', marginLeft: 'auto' }}>{timeAgo(rc.created_at)}</span>
+                          <div style={{ display: 'flex', gap: 4 }}>
+                            {editingReviewId !== rc.id && (
+                              <>
+                                <button className="btn-icon" onClick={() => handleEditReviewComment(rc)} title="编辑" style={{ fontSize: 11, padding: '2px 6px' }}>
+                                  {Icon.code(12)}
+                                </button>
+                                <button className="btn-icon" onClick={() => handleDeleteReviewComment(rc.id)} title="删除" style={{ fontSize: 11, padding: '2px 6px', color: 'var(--mac-red)' }}>
+                                  {Icon.trash(12)}
+                                </button>
+                              </>
+                            )}
+                          </div>
+                        </div>
+                        {editingReviewId === rc.id ? (
+                          <div>
+                            <textarea
+                              value={editReviewBody}
+                              onChange={e => setEditReviewBody(e.target.value)}
+                              rows={3}
+                              style={{
+                                width: '100%', padding: '8px 12px', borderRadius: 8,
+                                border: '1px solid var(--mac-border)', background: 'var(--mac-bg)',
+                                fontSize: 13, color: 'var(--mac-text)', outline: 'none',
+                                resize: 'vertical', fontFamily: 'inherit', marginBottom: 8,
+                              }}
+                            />
+                            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 6 }}>
+                              <button className="btn-secondary" onClick={() => { setEditingReviewId(null); setEditReviewBody('') }} style={{ fontSize: 11, padding: '3px 10px' }}>取消</button>
+                              <button className="btn-primary" onClick={() => handleSaveReviewEdit(rc.id)} disabled={savingReviewEdit || !editReviewBody.trim()} style={{ fontSize: 11, padding: '3px 10px' }}>
+                                {savingReviewEdit ? '保存中...' : '保存'}
+                              </button>
+                            </div>
+                          </div>
+                        ) : (
+                          <div style={{ fontSize: 12, color: 'var(--mac-text)', lineHeight: 1.5, whiteSpace: 'pre-wrap' }}>
+                            {rc.body}
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {/* Add review comment form */}
+                <div className="glass" style={{ padding: 14 }}>
+                  <div style={{ fontSize: 12, fontWeight: 500, color: 'var(--mac-text-secondary)', marginBottom: 8 }}>添加审查评论</div>
+                  <input
+                    type="text"
+                    value={newReviewPath}
+                    onChange={e => setNewReviewPath(e.target.value)}
+                    placeholder="文件路径 (例如: src/index.js)"
+                    style={{
+                      width: '100%', padding: '6px 12px', borderRadius: 8,
+                      border: '1px solid var(--mac-border)', background: 'var(--mac-bg)',
+                      fontSize: 12, color: 'var(--mac-text)', outline: 'none',
+                      fontFamily: 'monospace', marginBottom: 8,
+                    }}
+                  />
+                  <textarea
+                    value={newReviewComment}
+                    onChange={e => setNewReviewComment(e.target.value)}
+                    placeholder="写下你的审查评论..."
+                    rows={3}
+                    style={{
+                      width: '100%', padding: '8px 12px', borderRadius: 8,
+                      border: '1px solid var(--mac-border)', background: 'var(--mac-bg)',
+                      fontSize: 13, color: 'var(--mac-text)', outline: 'none',
+                      resize: 'vertical', fontFamily: 'inherit', marginBottom: 10,
+                    }}
+                  />
+                  <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                    <button
+                      className="btn-primary"
+                      onClick={handleSubmitReviewComment}
+                      disabled={!newReviewComment.trim() || !newReviewPath.trim() || submittingReviewComment}
+                      style={{ display: 'flex', alignItems: 'center', gap: 4 }}
+                    >
+                      {submittingReviewComment ? '提交中...' : '提交评论'}
+                    </button>
+                  </div>
+                </div>
               </div>
             )
           )}
