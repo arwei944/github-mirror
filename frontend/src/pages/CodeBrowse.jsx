@@ -32,10 +32,10 @@ function FileViewer({ content, filename, path, onBack, onEdit, onDelete, repoNam
     setSaving(true)
     setMessage('')
     try {
-      const encoded = btoa(unescape(encodeURIComponent(editContent)))
+      // Backend handles base64 encoding, send raw content
       await api.put('/api/github/repos/' + repoName + '/contents/' + path, {
         message: commitMsg,
-        content: encoded,
+        content: editContent,
         sha: sha,
         branch: branch,
       })
@@ -277,7 +277,8 @@ export default function CodeBrowse({ githubRepos }) {
       const data = await api.get(`/api/github/repos/${repoName}/contents/${filePath}?ref=${branch}`)
       let fileContent = ''
       if (data && data.content) {
-        fileContent = decodeURIComponent(escape(atob(data.content)))
+        // Backend already decodes base64, use content directly
+        fileContent = data.content
       }
       setViewFile({ name: item.name, path: filePath, content: fileContent, sha: data?.sha || '' })
     } catch (err) {
@@ -292,10 +293,10 @@ export default function CodeBrowse({ githubRepos }) {
     setCreatingFile(true)
     setNewFileMessage('')
     try {
-      const encoded = btoa(unescape(encodeURIComponent(newFileForm.content)))
+      // Backend handles base64 encoding, send raw content
       await api.put('/api/github/repos/' + repoName + '/contents/' + newFileForm.path, {
         message: newFileForm.message,
-        content: encoded,
+        content: newFileForm.content,
         branch: branch,
       })
       setNewFileMessage('文件创建成功')
