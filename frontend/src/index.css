@@ -139,6 +139,37 @@ body {
   background: var(--mac-bg);
 }
 
+.card-grid-scroll {
+  height: 100vh;
+  overflow-y: auto;
+}
+
+/* ============ Project Card ============ */
+.project-card {
+  padding: 14px;
+  cursor: pointer;
+  position: relative;
+  transition: box-shadow 0.15s, transform 0.15s;
+}
+.project-card:hover {
+  box-shadow: var(--mac-shadow-lg);
+  transform: translateY(-1px);
+}
+.card-hover-actions {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  padding: 8px 14px;
+  border-top: 1px solid var(--mac-border);
+  background: var(--mac-surface);
+  border-radius: 0 0 var(--mac-radius) var(--mac-radius);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  animation: fade-in 0.12s ease-out;
+}
+
 /* ============ Detail Content ============ */
 .detail-content {
   display: flex;
