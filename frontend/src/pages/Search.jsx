@@ -7,6 +7,7 @@ const SEARCH_TYPES = [
   { key: 'code', label: '代码' },
   { key: 'issues', label: 'Issues' },
   { key: 'commits', label: '提交' },
+  { key: 'users', label: '用户' },
 ]
 
 function highlightMatch(text, query) {
@@ -190,6 +191,44 @@ function CommitResult({ item, query }) {
   )
 }
 
+function UserResult({ item, query }) {
+  return (
+    <div className="glass animate-fade-in" style={{ padding: '12px 16px' }}>
+      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
+        {item.avatar_url && (
+          <img src={item.avatar_url} alt="" style={{ width: 32, height: 32, borderRadius: '50%', flexShrink: 0 }} />
+        )}
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <span style={{ fontSize: 14, fontWeight: 600 }}>
+              {highlightMatch(item.login, query)}
+            </span>
+            {item.type && (
+              <span style={{
+                fontSize: 10, padding: '1px 7px', borderRadius: 10, fontWeight: 600,
+                background: 'var(--mac-gray)', color: 'var(--mac-text-secondary)',
+              }}>
+                {item.type}
+              </span>
+            )}
+            {item.score !== undefined && (
+              <span style={{ fontSize: 10, color: 'var(--mac-text-secondary)' }}>
+                评分: {typeof item.score === 'number' ? item.score.toFixed(2) : item.score}
+              </span>
+            )}
+          </div>
+          {item.html_url && (
+            <a href={item.html_url} target="_blank" rel="noopener noreferrer"
+              style={{ fontSize: 11, color: 'var(--mac-accent)', textDecoration: 'none', marginTop: 2, display: 'inline-block' }}>
+              {item.html_url}
+            </a>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
 export default function Search({ githubRepos, onSelectRepo }) {
   const [query, setQuery] = useState('')
   const [searchType, setSearchType] = useState('repos')
@@ -216,6 +255,9 @@ export default function Search({ githubRepos, onSelectRepo }) {
         setResults(data?.items || data || [])
       } else if (searchType === 'commits') {
         const data = await api.get(`/api/github/search/commits?q=${encodeURIComponent(query)}`).catch(() => [])
+        setResults(data?.items || data || [])
+      } else if (searchType === 'users') {
+        const data = await api.get(`/api/github/search/users?q=${encodeURIComponent(query)}`).catch(() => [])
         setResults(data?.items || data || [])
       } else {
         // API search for code
@@ -269,7 +311,7 @@ export default function Search({ githubRepos, onSelectRepo }) {
             value={query}
             onChange={e => setQuery(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder={searchType === 'repos' ? '搜索仓库...' : searchType === 'issues' ? '搜索 Issues...' : searchType === 'commits' ? '搜索提交...' : '搜索代码...'}
+            placeholder={searchType === 'repos' ? '搜索仓库...' : searchType === 'issues' ? '搜索 Issues...' : searchType === 'commits' ? '搜索提交...' : searchType === 'users' ? '搜索用户...' : '搜索代码...'}
             autoFocus
             style={{
               width: '100%', padding: '12px 16px 12px 40px', borderRadius: 12,
@@ -338,6 +380,10 @@ export default function Search({ githubRepos, onSelectRepo }) {
               ) : searchType === 'commits' ? (
                 results.map((item, idx) => (
                   <CommitResult key={item.sha || idx} item={item} query={query} />
+                ))
+              ) : searchType === 'users' ? (
+                results.map((item, idx) => (
+                  <UserResult key={item.id || idx} item={item} query={query} />
                 ))
               ) : (
                 results.map((item, idx) => (

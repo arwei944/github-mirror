@@ -20,7 +20,7 @@ from fastapi import FastAPI, Query, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 
-__version__ = "3.4.0"
+__version__ = "3.6.0"
 
 app = FastAPI(
     version=__version__,
@@ -111,6 +111,11 @@ def github_api_post(path: str, data: Optional[dict] = None, **kwargs) -> tuple:
 def github_api_delete(path: str, **kwargs) -> tuple:
     """DELETE 请求"""
     return github_request(path, method="DELETE", **kwargs)
+
+
+def github_api_patch(path: str, data: Optional[dict] = None, **kwargs) -> tuple:
+    """PATCH 请求"""
+    return github_request(path, method="PATCH", data=data, **kwargs)
 
 
 # ──────────────────────────────────────────────
@@ -1895,6 +1900,256 @@ async def search_repositories(q: str = Query(..., description="搜索关键词")
         raise HTTPException(status_code=status, detail=f"搜索失败: {data}")
     items = data.get("items", []) if isinstance(data, dict) else []
     return {"total_count": data.get("total_count", 0), "items": [filter_repo_fields(i) for i in items]}
+
+
+# ──────────────────────────────────────────────
+# GitHub Search Extended API (v3.5.0)
+# ──────────────────────────────────────────────
+@app.get("/api/github/search/users")
+async def search_users(q: str = Query(..., description="搜索关键词"), per_page: int = Query(30, ge=1, le=100)):
+    """搜索用户"""
+    if not GITHUB_TOKEN:
+        raise HTTPException(status_code=500, detail="未配置 GITHUB_TOKEN")
+    qs = urllib.parse.urlencode({"q": q, "per_page": per_page})
+    status, data = github_api_get(f"/search/users?{qs}")
+    if status != 200:
+        raise HTTPException(status_code=status, detail=f"搜索失败: {data}")
+    items = data.get("items", []) if isinstance(data, dict) else []
+    return {"total_count": data.get("total_count", 0), "items": [{"login": i.get("login", ""), "id": i.get("id", 0), "avatar_url": i.get("avatar_url", ""), "html_url": i.get("html_url", ""), "type": i.get("type", ""), "score": i.get("score", 0)} for i in items]}
+
+
+@app.get("/api/github/search/labels")
+async def search_labels(repo_name: str, q: str = Query(..., description="搜索关键词"), per_page: int = Query(30, ge=1, le=100)):
+    """搜索仓库标签"""
+    if not GITHUB_TOKEN:
+        raise HTTPException(status_code=500, detail="未配置 GITHUB_TOKEN")
+    owner = GITHUB_USER
+    qs = urllib.parse.urlencode({"q": q, "repository_id": f"{owner}/{repo_name}", "per_page": per_page})
+    status, data = github_api_get(f"/search/labels?q={urllib.parse.quote(q)}&repository_id={owner}%2F{repo_name}&per_page={per_page}")
+    if status != 200:
+        raise HTTPException(status_code=status, detail=f"搜索失败: {data}")
+    items = data.get("items", []) if isinstance(data, dict) else []
+    return {"total_count": data.get("total_count", 0), "items": [{"id": i.get("id", 0), "name": i.get("name", ""), "color": i.get("color", ""), "description": i.get("description", "")} for i in items]}
+
+
+# ──────────────────────────────────────────────
+# GitHub Repository Enhanced API (v3.5.0)
+# ──────────────────────────────────────────────
+@app.get("/api/github/repos/{repo_name}/subscription")
+async def get_repo_subscription(repo_name: str):
+    """获取仓库订阅状态"""
+    status, data = github_api_get(f"/repos/{GITHUB_USER}/{repo_name}/subscription")
+    if status == 404:
+        return {"subscribed": False, "ignored": False, "reason": None, "created_at": None, "thread_url": None}
+    if status != 200:
+        raise HTTPException(status_code=status, detail=f"获取订阅状态失败: {data}")
+    return data
+
+
+@app.put("/api/github/repos/{repo_name}/subscription")
+async def set_repo_subscription(repo_name: str, request: Request):
+    """设置仓库订阅"""
+    body = await request.json()
+    status, data = github_api_put(f"/repos/{GITHUB_USER}/{repo_name}/subscription", body)
+    if status != 200:
+        raise HTTPException(status_code=status, detail=f"设置订阅失败: {data}")
+    return data
+
+
+@app.delete("/api/github/repos/{repo_name}/subscription")
+async def delete_repo_subscription(repo_name: str):
+    """取消仓库订阅"""
+    status, data = github_api_delete(f"/repos/{GITHUB_USER}/{repo_name}/subscription")
+    if status != 204:
+        raise HTTPException(status_code=status, detail=f"取消订阅失败: {data}")
+    return {"message": "已取消订阅"}
+
+
+@app.get("/api/github/repos/{repo_name}/forks")
+async def list_forks(repo_name: str, per_page: int = Query(30, ge=1, le=100)):
+    """获取仓库 Fork 列表"""
+    qs = urllib.parse.urlencode({"per_page": per_page, "sort": "newest"})
+    status, data = github_api_get(f"/repos/{GITHUB_USER}/{repo_name}/forks?{qs}")
+    if status != 200:
+        raise HTTPException(status_code=status, detail=f"获取 Fork 列表失败: {data}")
+    return [{"id": f.get("id", 0), "name": f.get("name", ""), "full_name": f.get("full_name", ""), "owner": f.get("owner", {}).get("login", ""), "html_url": f.get("html_url", ""), "description": f.get("description", ""), "created_at": f.get("created_at", ""), "updated_at": f.get("updated_at", "")} for f in (data if isinstance(data, list) else [])]
+
+
+@app.get("/api/github/repos/{repo_name}/collaborators")
+async def list_collaborators(repo_name: str, per_page: int = Query(30, ge=1, le=100)):
+    """获取仓库协作者列表"""
+    qs = urllib.parse.urlencode({"per_page": per_page})
+    status, data = github_api_get(f"/repos/{GITHUB_USER}/{repo_name}/collaborators?{qs}")
+    if status != 200:
+        raise HTTPException(status_code=status, detail=f"获取协作者列表失败: {data}")
+    return [{"login": c.get("login", ""), "id": c.get("id", 0), "avatar_url": c.get("avatar_url", ""), "html_url": c.get("html_url", ""), "permissions": c.get("permissions", {}), "role_name": c.get("role_name", "")} for c in (data if isinstance(data, list) else [])]
+
+
+@app.put("/api/github/repos/{repo_name}/collaborators/{username}")
+async def add_collaborator(repo_name: str, username: str, request: Request):
+    """添加仓库协作者"""
+    body = await request.json()
+    status, data = github_api_put(f"/repos/{GITHUB_USER}/{repo_name}/collaborators/{username}", body)
+    if status != 201 and status != 204:
+        raise HTTPException(status_code=status, detail=f"添加协作者失败: {data}")
+    return {"message": f"已添加协作者 {username}"}
+
+
+@app.delete("/api/github/repos/{repo_name}/collaborators/{username}")
+async def remove_collaborator(repo_name: str, username: str):
+    """移除仓库协作者"""
+    status, data = github_api_delete(f"/repos/{GITHUB_USER}/{repo_name}/collaborators/{username}")
+    if status != 204:
+        raise HTTPException(status_code=status, detail=f"移除协作者失败: {data}")
+    return {"message": f"已移除协作者 {username}"}
+
+
+@app.get("/api/github/repos/{repo_name}/commits/{ref}/status")
+async def get_commit_status(repo_name: str, ref: str):
+    """获取提交的 CI 状态"""
+    status, data = github_api_get(f"/repos/{GITHUB_USER}/{repo_name}/commits/{ref}/status")
+    if status != 200:
+        raise HTTPException(status_code=status, detail=f"获取提交状态失败: {data}")
+    return data
+
+
+@app.get("/api/github/repos/{repo_name}/stargazers")
+async def list_stargazers(repo_name: str, per_page: int = Query(30, ge=1, le=100)):
+    """获取仓库 Star 用户列表"""
+    qs = urllib.parse.urlencode({"per_page": per_page})
+    status, data = github_api_get(f"/repos/{GITHUB_USER}/{repo_name}/stargazers?{qs}")
+    if status != 200:
+        raise HTTPException(status_code=status, detail=f"获取 Star 列表失败: {data}")
+    return [{"login": s.get("login", ""), "id": s.get("id", 0), "avatar_url": s.get("avatar_url", ""), "html_url": s.get("html_url", ""), "starred_at": s.get("starred_at", "")} for s in (data if isinstance(data, list) else [])]
+
+
+# ──────────────────────────────────────────────
+# GitHub User & Rate Limit API (v3.5.0)
+# ──────────────────────────────────────────────
+@app.get("/api/github/user")
+async def get_user_profile():
+    """获取当前用户资料"""
+    status, data = github_api_get("/user")
+    if status != 200:
+        raise HTTPException(status_code=status, detail=f"获取用户资料失败: {data}")
+    return data
+
+
+@app.patch("/api/github/user")
+async def update_user_profile(request: Request):
+    """更新当前用户资料"""
+    body = await request.json()
+    status, data = github_api_patch("/user", body)
+    if status != 200:
+        raise HTTPException(status_code=status, detail=f"更新用户资料失败: {data}")
+    return data
+
+
+@app.get("/api/github/rate_limit")
+async def get_rate_limit():
+    """获取 API 配额"""
+    status, data = github_api_get("/rate_limit")
+    if status != 200:
+        raise HTTPException(status_code=status, detail=f"获取 API 配额失败: {data}")
+    return data
+
+
+# ──────────────────────────────────────────────
+# GitHub PR Auto-Merge API (v3.6.0)
+# ──────────────────────────────────────────────
+@app.get("/api/github/repos/{repo_name}/pulls/{pull_number}/auto-merge")
+async def get_pr_auto_merge(repo_name: str, pull_number: int):
+    """获取 PR 自动合并状态"""
+    status, data = github_api_get(f"/repos/{GITHUB_USER}/{repo_name}/pulls/{pull_number}/auto-merge")
+    if status == 404:
+        return {"enabled": False, "merge_method": None}
+    if status != 200:
+        raise HTTPException(status_code=status, detail=f"获取自动合并状态失败: {data}")
+    return data
+
+
+@app.put("/api/github/repos/{repo_name}/pulls/{pull_number}/auto-merge")
+async def enable_pr_auto_merge(repo_name: str, pull_number: int, request: Request):
+    """启用 PR 自动合并"""
+    body = await request.json()
+    status, data = github_api_put(f"/repos/{GITHUB_USER}/{repo_name}/pulls/{pull_number}/auto-merge", body)
+    if status != 200:
+        raise HTTPException(status_code=status, detail=f"启用自动合并失败: {data}")
+    return data
+
+
+@app.delete("/api/github/repos/{repo_name}/pulls/{pull_number}/auto-merge")
+async def disable_pr_auto_merge(repo_name: str, pull_number: int):
+    """禁用 PR 自动合并"""
+    status, data = github_api_delete(f"/repos/{GITHUB_USER}/{repo_name}/pulls/{pull_number}/auto-merge")
+    if status != 204:
+        raise HTTPException(status_code=status, detail=f"禁用自动合并失败: {data}")
+    return {"message": "已禁用自动合并"}
+
+
+# ──────────────────────────────────────────────
+# GitHub Webhook Enhanced API (v3.6.0)
+# ──────────────────────────────────────────────
+@app.patch("/api/github/repos/{repo_name}/hooks/{hook_id}")
+async def update_webhook(repo_name: str, hook_id: int, request: Request):
+    """更新 Webhook"""
+    body = await request.json()
+    status, data = github_api_patch(f"/repos/{GITHUB_USER}/{repo_name}/hooks/{hook_id}", body)
+    if status != 200:
+        raise HTTPException(status_code=status, detail=f"更新 Webhook 失败: {data}")
+    return data
+
+
+@app.get("/api/github/repos/{repo_name}/hooks/{hook_id}/deliveries")
+async def list_webhook_deliveries(repo_name: str, hook_id: int, per_page: int = Query(30, ge=1, le=100)):
+    """获取 Webhook 投递记录"""
+    qs = urllib.parse.urlencode({"per_page": per_page})
+    status, data = github_api_get(f"/repos/{GITHUB_USER}/{repo_name}/hooks/{hook_id}/deliveries?{qs}")
+    if status != 200:
+        raise HTTPException(status_code=status, detail=f"获取投递记录失败: {data}")
+    return data
+
+
+@app.get("/api/github/repos/{repo_name}/hooks/{hook_id}/deliveries/{delivery_id}")
+async def get_webhook_delivery(repo_name: str, hook_id: int, delivery_id: int):
+    """获取单条 Webhook 投递详情"""
+    status, data = github_api_get(f"/repos/{GITHUB_USER}/{repo_name}/hooks/{hook_id}/deliveries/{delivery_id}")
+    if status != 200:
+        raise HTTPException(status_code=status, detail=f"获取投递详情失败: {data}")
+    return data
+
+
+# ──────────────────────────────────────────────
+# GitHub Branch Protection API (v3.6.0)
+# ──────────────────────────────────────────────
+@app.get("/api/github/repos/{repo_name}/branches/{branch}/protection")
+async def get_branch_protection(repo_name: str, branch: str):
+    """获取分支保护规则"""
+    status, data = github_api_get(f"/repos/{GITHUB_USER}/{repo_name}/branches/{branch}/protection")
+    if status == 404:
+        return {"enabled": False}
+    if status != 200:
+        raise HTTPException(status_code=status, detail=f"获取分支保护失败: {data}")
+    return data
+
+
+@app.put("/api/github/repos/{repo_name}/branches/{branch}/protection")
+async def update_branch_protection(repo_name: str, branch: str, request: Request):
+    """更新分支保护规则"""
+    body = await request.json()
+    status, data = github_api_put(f"/repos/{GITHUB_USER}/{repo_name}/branches/{branch}/protection", body)
+    if status != 200:
+        raise HTTPException(status_code=status, detail=f"更新分支保护失败: {data}")
+    return data
+
+
+@app.delete("/api/github/repos/{repo_name}/branches/{branch}/protection")
+async def delete_branch_protection(repo_name: str, branch: str):
+    """删除分支保护规则"""
+    status, data = github_api_delete(f"/repos/{GITHUB_USER}/{repo_name}/branches/{branch}/protection")
+    if status != 204:
+        raise HTTPException(status_code=status, detail=f"删除分支保护失败: {data}")
+    return {"message": f"已删除 {branch} 分支保护规则"}
 
 
 # ──────────────────────────────────────────────

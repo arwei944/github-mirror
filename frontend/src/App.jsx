@@ -11,6 +11,7 @@ import PullDetail from './pages/PullDetail'
 import Actions from './pages/Actions'
 import CodeBrowse from './pages/CodeBrowse'
 import Search from './pages/Search'
+import Profile from './pages/Profile'
 import Settings from './pages/Settings'
 
 // ============ Icons ============
@@ -181,6 +182,7 @@ export default function App() {
     { key: 'actions', label: 'Actions', icon: Icon.zap(16) },
     { key: 'code', label: '代码浏览', icon: Icon.code(16) },
     { key: 'search', label: '搜索', icon: Icon.search(16) },
+    { key: 'profile', label: '个人中心', icon: Icon.users(16) },
     { key: 'settings', label: '设置', icon: Icon.tag(16) },
     { key: 'activity', label: '活动流', icon: Icon.activity(16) },
     { key: 'deploy', label: '部署管理', icon: Icon.deploy(16) },
@@ -262,6 +264,10 @@ export default function App() {
             onSelectRepo={handleSelectRepo}
           />
         )
+      case 'profile':
+        return (
+          <Profile />
+        )
       case 'settings':
         return (
           <Settings
@@ -298,7 +304,7 @@ export default function App() {
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <span style={{ color: 'var(--mac-text)' }}>{Icon.github(18)}</span>
             <span style={{ fontSize: 15, fontWeight: 600, letterSpacing: '-0.02em' }}>GitHub Mirror</span>
-            <span style={{ fontSize: 9, padding: '1px 6px', borderRadius: 8, background: 'var(--mac-accent)', color: 'white', fontWeight: 500 }}>v3.4</span>
+            <span style={{ fontSize: 9, padding: '1px 6px', borderRadius: 8, background: 'var(--mac-accent)', color: 'white', fontWeight: 500 }}>v3.6</span>
           </div>
         </div>
 
@@ -307,7 +313,7 @@ export default function App() {
           {navItems.map(item => (
             <div
               key={item.key}
-              className={`nav-item ${currentPage === item.key || (item.key === 'issues' && currentPage === 'issue-detail') || (item.key === 'pulls' && currentPage === 'pull-detail') ? 'active' : ''}`}
+              className={`nav-item ${currentPage === item.key || (item.key === 'issues' && currentPage === 'issue-detail') || (item.key === 'pulls' && currentPage === 'pull-detail') || (item.key === 'profile' && currentPage === 'profile') ? 'active' : ''}`}
               onClick={() => navigateTo(item.key)}
             >
               {item.icon}
