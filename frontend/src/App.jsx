@@ -94,16 +94,7 @@ function LanguageBar({ languages }) {
 }
 
 // ============ Sidebar ============
-function Sidebar({ githubRepos, projects, hfSpaces, filter, setFilter, search, setSearch, selectedRepo, onSelect, loading, onAdd, onRemove, onToggleAuto, onDeploy, onRefresh }) {
-  const projectMap = Object.fromEntries(projects.map(p => [p.name, p]))
-  const getHfStatus = (name) => hfSpaces.find(s => s.name === name)?.stage || null
-  const stats = { total:githubRepos.length, deployed:projects.length, auto:projects.filter(p => p.config.auto_deploy).length }
-
-  const filtered = (filter === 'all' ? githubRepos
-    : filter === 'deployed' ? githubRepos.filter(r => projectMap[r.name])
-    : githubRepos.filter(r => !projectMap[r.name])
-  ).filter(r => !search || r.name.toLowerCase().includes(search.toLowerCase()) || (r.description||'').toLowerCase().includes(search.toLowerCase()))
-
+function Sidebar({ stats, filter, setFilter, search, setSearch, selectedRepo, onDeselect, onRefresh }) {
   return (
     <aside className="sidebar">
       {/* Sidebar Header */}
@@ -124,15 +115,15 @@ function Sidebar({ githubRepos, projects, hfSpaces, filter, setFilter, search, s
         </div>
       </div>
 
-      {/* Filter Tabs */}
-      <div style={{ display:'flex', gap:2, padding:'8px 16px', borderBottom:'1px solid var(--mac-border)' }}>
+      {/* Filter */}
+      <div style={{ display:'flex', gap:2, padding:'10px 16px', borderBottom:'1px solid var(--mac-border)' }}>
         {[
           { key:'all', label:'全部' },
           { key:'deployed', label:'已部署' },
           { key:'available', label:'未部署' },
         ].map(f => (
-          <button key={f.key} onClick={() => setFilter(f.key)}
-            style={{ flex:1, padding:'5px 0', borderRadius:6, border:'none', cursor:'pointer', fontSize:11, fontWeight:500,
+          <button key={f.key} onClick={() => { setFilter(f.key); onDeselect?.() }}
+            style={{ flex:1, padding:'6px 0', borderRadius:6, border:'none', cursor:'pointer', fontSize:11, fontWeight:500,
               background: filter===f.key ? 'var(--mac-accent)' : 'transparent',
               color: filter===f.key ? 'white' : 'var(--mac-text-secondary)', transition:'all 0.15s' }}>
             {f.label} {f.key==='all' ? stats.total : f.key==='deployed' ? stats.deployed : stats.total-stats.deployed}
@@ -140,57 +131,20 @@ function Sidebar({ githubRepos, projects, hfSpaces, filter, setFilter, search, s
         ))}
       </div>
 
-      {/* Repo List */}
-      <div className="sidebar-list">
-        {filtered.map(repo => {
-          const isActive = selectedRepo === repo.name
-          const isDeployed = !!projectMap[repo.name]
-          const config = projectMap[repo.name]?.config || {}
-          const lastDeploy = projectMap[repo.name]?.last_deploy
-          const hfStatus = getHfStatus(repo.name)
+      {/* Spacer */}
+      <div style={{ flex:1 }} />
 
-          return (
-            <div key={repo.name}
-              className={`sidebar-item ${isActive ? 'active' : ''}`}
-              onClick={() => onSelect(repo.name)}>
-              <div style={{ display:'flex', alignItems:'center', gap:8, flex:1, minWidth:0 }}>
-                {isDeployed && <StatusDot status={lastDeploy?.status || 'idle'} />}
-                {!isDeployed && <span style={{ width:8, height:8, borderRadius:2, background:'var(--mac-gray)', display:'inline-block', flexShrink:0 }} />}
-                <div style={{ flex:1, minWidth:0 }}>
-                  <div style={{ display:'flex', alignItems:'center', gap:4 }}>
-                    <span style={{ fontSize:13, fontWeight: isActive ? 600 : 500, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{repo.name}</span>
-                    {repo.visibility === 'private' && <span style={{ color:'var(--mac-text-secondary)', flexShrink:0 }}>{Icon.lock(9)}</span>}
-                  </div>
-                  <div style={{ display:'flex', alignItems:'center', gap:6, marginTop:1, fontSize:10, color:'var(--mac-text-secondary)' }}>
-                    {repo.language && <span style={{ display:'flex', alignItems:'center', gap:3 }}>
-                      <span style={{ width:7, height:7, borderRadius:2, background:langColor(repo.language), display:'inline-block' }} />
-                      {repo.language}
-                    </span>}
-                    <span>{timeAgo(repo.updated_at)}</span>
-                  </div>
-                </div>
-              </div>
-              {/* Quick actions on hover */}
-              <div className="sidebar-item-actions" onClick={e => e.stopPropagation()}>
-                {isDeployed ? (
-                  <div style={{ display:'flex', alignItems:'center', gap:4 }}>
-                    <button className={`toggle toggle-sm ${config.auto_deploy?'active':''}`} onClick={() => onToggleAuto(repo.name)} title="自动部署" />
-                    <button className="btn-icon" onClick={() => onDeploy(repo.name)} disabled={loading[repo.name]} title="部署">{Icon.deploy(13)}</button>
-                  </div>
-                ) : (
-                  <button className="btn-icon-sm" onClick={() => onAdd(repo)} title="添加部署">+</button>
-                )}
-              </div>
-            </div>
-          )
-        })}
-        {filtered.length === 0 && (
-          <div style={{ textAlign:'center', padding:32, color:'var(--mac-text-secondary)', fontSize:12 }}>
-            <div style={{ fontSize:24, marginBottom:6 }}>🔍</div>
-            没有匹配的项目
-          </div>
-        )}
-      </div>
+      {/* Back button (when in detail view) */}
+      {selectedRepo && (
+        <div style={{ padding:'12px 16px', borderTop:'1px solid var(--mac-border)' }}>
+          <button onClick={onDeselect}
+            style={{ width:'100%', display:'flex', alignItems:'center', justifyContent:'center', gap:5, padding:'7px 0', borderRadius:8, border:'1px solid var(--mac-border)', background:'var(--mac-bg)', cursor:'pointer', fontSize:12, fontWeight:500, color:'var(--mac-text-secondary)', transition:'all 0.15s' }}
+            onMouseEnter={e => { e.currentTarget.style.background='var(--mac-surface-hover)'; e.currentTarget.style.color='var(--mac-text)' }}
+            onMouseLeave={e => { e.currentTarget.style.background='var(--mac-bg)'; e.currentTarget.style.color='var(--mac-text-secondary)' }}>
+            {Icon.back(13)} 返回列表
+          </button>
+        </div>
+      )}
 
       {/* Sidebar Footer */}
       <div style={{ padding:'10px 16px', borderTop:'1px solid var(--mac-border)', fontSize:10, color:'var(--mac-text-secondary)', display:'flex', gap:12 }}>
@@ -455,14 +409,20 @@ function ProjectCard({ repo, isDeployed, config, lastDeploy, hfStatus, isDeployi
 }
 
 // ============ Card Grid (default main view) ============
-function CardGrid({ githubRepos, projects, hfSpaces, loading, onSelect, onAdd, onRemove, onToggleAuto, onDeploy }) {
+function CardGrid({ githubRepos, projects, hfSpaces, loading, filter, search, onSelect, onAdd, onRemove, onToggleAuto, onDeploy }) {
   const projectMap = Object.fromEntries(projects.map(p => [p.name, p]))
   const getHfStatus = (name) => hfSpaces.find(s => s.name === name)?.stage || null
+
+  const filtered = (filter === 'all' ? githubRepos
+    : filter === 'deployed' ? githubRepos.filter(r => projectMap[r.name])
+    : githubRepos.filter(r => !projectMap[r.name])
+  ).filter(r => !search || r.name.toLowerCase().includes(search.toLowerCase()) || (r.description||'').toLowerCase().includes(search.toLowerCase()))
+
   return (
     <div className="card-grid-scroll">
       <div style={{ padding:'20px 24px 48px' }}>
         <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(300px, 1fr))', gap:12 }}>
-          {githubRepos.map(repo => (
+          {filtered.map(repo => (
             <ProjectCard key={repo.name} repo={repo}
               isDeployed={!!projectMap[repo.name]}
               config={projectMap[repo.name]?.config || {}}
@@ -473,10 +433,11 @@ function CardGrid({ githubRepos, projects, hfSpaces, loading, onSelect, onAdd, o
               onToggleAuto={onToggleAuto} onDeploy={onDeploy} />
           ))}
         </div>
-        {githubRepos.length === 0 && (
+        {filtered.length === 0 && (
           <div style={{ textAlign:'center', padding:64, color:'var(--mac-text-secondary)' }}>
-            <div style={{ fontSize:36, marginBottom:8 }}>📦</div>
-            <div style={{ fontSize:14, fontWeight:500 }}>暂无项目</div>
+            <div style={{ fontSize:36, marginBottom:8 }}>🔍</div>
+            <div style={{ fontSize:14, fontWeight:500 }}>没有找到匹配的项目</div>
+            <div style={{ fontSize:12, marginTop:4 }}>试试其他关键词或筛选条件</div>
           </div>
         )}
       </div>
@@ -527,11 +488,9 @@ export default function App() {
   return (
     <div className="app-layout">
       <Sidebar
-        githubRepos={githubRepos} projects={projects} hfSpaces={hfSpaces}
+        stats={stats}
         filter={filter} setFilter={setFilter} search={search} setSearch={setSearch}
-        selectedRepo={selectedRepo} onSelect={setSelectedRepo}
-        loading={loading} onAdd={addProject} onRemove={removeProject}
-        onToggleAuto={toggleAuto} onDeploy={deploy} onRefresh={loadAll}
+        selectedRepo={selectedRepo} onDeselect={() => setSelectedRepo(null)} onRefresh={loadAll}
       />
       <main className="main-content">
         {selectedRepo ? (
@@ -542,7 +501,8 @@ export default function App() {
         ) : (
           <CardGrid
             githubRepos={githubRepos} projects={projects} hfSpaces={hfSpaces}
-            loading={loading} onSelect={setSelectedRepo}
+            loading={loading} filter={filter} search={search}
+            onSelect={setSelectedRepo}
             onAdd={addProject} onRemove={removeProject}
             onToggleAuto={toggleAuto} onDeploy={deploy}
           />
