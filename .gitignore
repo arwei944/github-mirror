@@ -1,6 +1,5 @@
 node_modules/
 dist/
-static/
 data/
 *.pyc
 __pycache__/
