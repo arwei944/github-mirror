@@ -1,0 +1,112 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --mac-bg: #f5f5f7;
+  --mac-surface: rgba(255, 255, 255, 0.72);
+  --mac-surface-hover: rgba(255, 255, 255, 0.9);
+  --mac-border: rgba(0, 0, 0, 0.06);
+  --mac-text: #1d1d1f;
+  --mac-text-secondary: #86868b;
+  --mac-accent: #0071e3;
+  --mac-accent-hover: #0077ED;
+  --mac-green: #34c759;
+  --mac-red: #ff3b30;
+  --mac-orange: #ff9500;
+  --mac-gray: #e8e8ed;
+  --mac-shadow: 0 1px 3px rgba(0,0,0,0.08), 0 1px 2px rgba(0,0,0,0.06);
+  --mac-shadow-lg: 0 4px 24px rgba(0,0,0,0.1), 0 1px 4px rgba(0,0,0,0.06);
+  --mac-radius: 12px;
+  --mac-blur: blur(20px);
+}
+
+.dark {
+  --mac-bg: #1c1c1e;
+  --mac-surface: rgba(44, 44, 46, 0.72);
+  --mac-surface-hover: rgba(58, 58, 60, 0.9);
+  --mac-border: rgba(255, 255, 255, 0.08);
+  --mac-text: #f5f5f7;
+  --mac-text-secondary: #98989d;
+  --mac-accent: #2997ff;
+  --mac-accent-hover: #40a9ff;
+  --mac-green: #30d158;
+  --mac-red: #ff453a;
+  --mac-orange: #ff9f0a;
+  --mac-gray: #38383a;
+  --mac-shadow: 0 1px 3px rgba(0,0,0,0.3);
+  --mac-shadow-lg: 0 4px 24px rgba(0,0,0,0.4);
+}
+
+* { box-sizing: border-box; }
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'SF Pro Text', 'Helvetica Neue', sans-serif;
+  background: var(--mac-bg);
+  color: var(--mac-text);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--mac-gray); border-radius: 3px; }
+
+/* Animations */
+@keyframes fade-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes pulse-dot { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+.animate-fade-in { animation: fade-in 0.25s ease-out; }
+.animate-pulse-dot { animation: pulse-dot 1.2s ease-in-out infinite; }
+
+/* Glass card */
+.glass {
+  background: var(--mac-surface);
+  backdrop-filter: var(--mac-blur);
+  -webkit-backdrop-filter: var(--mac-blur);
+  border: 1px solid var(--mac-border);
+  border-radius: var(--mac-radius);
+  box-shadow: var(--mac-shadow);
+}
+.glass:hover { background: var(--mac-surface-hover); }
+
+/* Mac button */
+.btn-primary {
+  background: var(--mac-accent);
+  color: white;
+  border: none;
+  border-radius: 8px;
+  padding: 6px 16px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.btn-primary:hover { background: var(--mac-accent-hover); }
+.btn-primary:disabled { opacity: 0.4; cursor: not-allowed; }
+
+.btn-secondary {
+  background: var(--mac-gray);
+  color: var(--mac-text);
+  border: none;
+  border-radius: 8px;
+  padding: 6px 16px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.btn-secondary:hover { opacity: 0.8; }
+
+/* Toggle */
+.toggle { position: relative; width: 40px; height: 24px; border-radius: 12px; background: var(--mac-gray); cursor: pointer; transition: background 0.2s; border: none; padding: 0; }
+.toggle.active { background: var(--mac-green); }
+.toggle::after { content: ''; position: absolute; top: 2px; left: 2px; width: 20px; height: 20px; border-radius: 50%; background: white; box-shadow: 0 1px 3px rgba(0,0,0,0.2); transition: transform 0.2s; }
+.toggle.active::after { transform: translateX(16px); }
+
+/* Status dot */
+.status-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+.status-running { background: var(--mac-green); }
+.status-building { background: var(--mac-orange); animation: pulse-dot 1.2s ease-in-out infinite; }
+.status-error { background: var(--mac-red); }
+.status-idle { background: var(--mac-gray); }
