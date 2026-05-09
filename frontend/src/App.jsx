@@ -392,17 +392,93 @@ function DetailContent({ repoName, projects, hfSpaces, onAdd, onRemove, onToggle
   )
 }
 
-// ============ Welcome (no selection) ============
-function Welcome({ stats }) {
+// ============ Project Card (for main grid) ============
+function ProjectCard({ repo, isDeployed, config, lastDeploy, hfStatus, isDeploying, onSelect, onAdd, onRemove, onToggleAuto, onDeploy }) {
+  const [hovered, setHovered] = useState(false)
   return (
-    <div style={{ display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', height:'100%', color:'var(--mac-text-secondary)', gap:8 }}>
-      <div style={{ fontSize:48, marginBottom:4 }}>⚙️</div>
-      <div style={{ fontSize:16, fontWeight:600, color:'var(--mac-text)' }}>部署服务</div>
-      <div style={{ fontSize:13 }}>从左侧选择一个项目查看详情</div>
-      <div style={{ fontSize:11, marginTop:8, display:'flex', gap:16 }}>
-        <span>{stats.total} 个仓库</span>
-        <span>{stats.deployed} 已部署</span>
-        <span>{stats.auto} 自动部署</span>
+    <div className="project-card glass animate-fade-in"
+      onClick={() => onSelect(repo.name)}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}>
+      {/* Top row */}
+      <div style={{ display:'flex', alignItems:'flex-start', justifyContent:'space-between', marginBottom:8 }}>
+        <div style={{ display:'flex', alignItems:'center', gap:6, flex:1, minWidth:0 }}>
+          {isDeployed && <StatusDot status={lastDeploy?.status || 'idle'} />}
+          {!isDeployed && <span style={{ width:7, height:7, borderRadius:2, background:'var(--mac-gray)', display:'inline-block', flexShrink:0 }} />}
+          <span style={{ fontSize:14, fontWeight:600, letterSpacing:'-0.01em', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{repo.name}</span>
+          {repo.visibility === 'private' && <span style={{ color:'var(--mac-text-secondary)', flexShrink:0 }}>{Icon.lock(10)}</span>}
+        </div>
+        {hfStatus && <span style={{ fontSize:9, padding:'1px 6px', borderRadius:6, background: hfStatus==='RUNNING' ? 'rgba(52,199,89,0.12)' : 'var(--mac-gray)', color: hfStatus==='RUNNING' ? 'var(--mac-green)' : 'var(--mac-text-secondary)', fontWeight:500, flexShrink:0 }}>{hfStatus}</span>}
+      </div>
+      {/* Description */}
+      {repo.description && (
+        <div style={{ fontSize:12, color:'var(--mac-text-secondary)', lineHeight:1.4, marginBottom:8, display:'-webkit-box', WebkitLineClamp:2, WebkitBoxOrient:'vertical', overflow:'hidden' }}>{repo.description}</div>
+      )}
+      {/* Language + topics */}
+      <div style={{ display:'flex', alignItems:'center', gap:6, flexWrap:'wrap', marginBottom:8 }}>
+        {repo.language && (
+          <span style={{ display:'flex', alignItems:'center', gap:3, fontSize:11, color:'var(--mac-text-secondary)' }}>
+            <span style={{ width:9, height:9, borderRadius:2, background:langColor(repo.language), display:'inline-block' }} />
+            {repo.language}
+          </span>
+        )}
+        {repo.topics?.slice(0,3).map(t => (
+          <span key={t} style={{ padding:'1px 7px', borderRadius:8, background:'var(--mac-accent)', color:'white', fontSize:9, fontWeight:500 }}>{t}</span>
+        ))}
+      </div>
+      {/* Stats */}
+      <div style={{ display:'flex', alignItems:'center', gap:12, fontSize:11, color:'var(--mac-text-secondary)' }}>
+        {repo.stargazers_count > 0 && <span style={{ display:'flex', alignItems:'center', gap:3 }}>{Icon.star(11)} {repo.stargazers_count}</span>}
+        {repo.forks_count > 0 && <span style={{ display:'flex', alignItems:'center', gap:3 }}>{Icon.fork(11)} {repo.forks_count}</span>}
+        <span style={{ display:'flex', alignItems:'center', gap:3 }}>{Icon.issue(11)} {repo.open_issues_count}</span>
+        <span style={{ marginLeft:'auto', fontSize:10 }}>{timeAgo(repo.updated_at)}</span>
+      </div>
+      {/* Hover actions */}
+      {hovered && (
+        <div className="card-hover-actions" onClick={e => e.stopPropagation()}>
+          {isDeployed ? (
+            <>
+              <button className={`toggle toggle-sm ${config.auto_deploy?'active':''}`} onClick={() => onToggleAuto(repo.name)} title="自动部署" />
+              <button className="btn-primary" onClick={() => onDeploy(repo.name)} disabled={isDeploying}
+                style={{ display:'flex', alignItems:'center', gap:3, fontSize:10, padding:'3px 10px' }}>
+                {Icon.deploy(11)} 部署
+              </button>
+              <button onClick={() => onRemove(repo.name)} className="btn-icon" title="移除">{Icon.trash(11)}</button>
+            </>
+          ) : (
+            <button className="btn-primary" onClick={() => onAdd(repo)} style={{ fontSize:10, padding:'3px 10px' }}>+ 添加部署</button>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ============ Card Grid (default main view) ============
+function CardGrid({ githubRepos, projects, hfSpaces, loading, onSelect, onAdd, onRemove, onToggleAuto, onDeploy }) {
+  const projectMap = Object.fromEntries(projects.map(p => [p.name, p]))
+  const getHfStatus = (name) => hfSpaces.find(s => s.name === name)?.stage || null
+  return (
+    <div className="card-grid-scroll">
+      <div style={{ padding:'20px 24px 48px' }}>
+        <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(300px, 1fr))', gap:12 }}>
+          {githubRepos.map(repo => (
+            <ProjectCard key={repo.name} repo={repo}
+              isDeployed={!!projectMap[repo.name]}
+              config={projectMap[repo.name]?.config || {}}
+              lastDeploy={projectMap[repo.name]?.last_deploy}
+              hfStatus={getHfStatus(repo.name)}
+              isDeploying={loading[repo.name]}
+              onSelect={onSelect} onAdd={onAdd} onRemove={onRemove}
+              onToggleAuto={onToggleAuto} onDeploy={onDeploy} />
+          ))}
+        </div>
+        {githubRepos.length === 0 && (
+          <div style={{ textAlign:'center', padding:64, color:'var(--mac-text-secondary)' }}>
+            <div style={{ fontSize:36, marginBottom:8 }}>📦</div>
+            <div style={{ fontSize:14, fontWeight:500 }}>暂无项目</div>
+          </div>
+        )}
       </div>
     </div>
   )
@@ -464,7 +540,12 @@ export default function App() {
             onAdd={loadAll} onRemove={loadAll} onToggleAuto={loadAll} onDeploy={loadAll}
           />
         ) : (
-          <Welcome stats={stats} />
+          <CardGrid
+            githubRepos={githubRepos} projects={projects} hfSpaces={hfSpaces}
+            loading={loading} onSelect={setSelectedRepo}
+            onAdd={addProject} onRemove={removeProject}
+            onToggleAuto={toggleAuto} onDeploy={deploy}
+          />
         )}
       </main>
     </div>
