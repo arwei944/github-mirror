@@ -111,7 +111,7 @@ function Sidebar({ githubRepos, projects, hfSpaces, filter, setFilter, search, s
         <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:12 }}>
           <span style={{ fontSize:18 }}>⚙️</span>
           <span style={{ fontSize:15, fontWeight:600, letterSpacing:'-0.02em' }}>部署服务</span>
-          <span style={{ fontSize:9, padding:'1px 6px', borderRadius:8, background:'var(--mac-accent)', color:'white', fontWeight:500 }}>v1.0.0</span>
+          <span style={{ fontSize:9, padding:'1px 6px', borderRadius:8, background:'var(--mac-accent)', color:'white', fontWeight:500 }}>v1.3.0</span>
           <button onClick={onRefresh} style={{ marginLeft:'auto', background:'none', border:'none', cursor:'pointer', color:'var(--mac-text-secondary)', padding:2, borderRadius:4, display:'flex' }}>{Icon.refresh(13)}</button>
         </div>
         {/* Search */}

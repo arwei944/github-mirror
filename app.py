@@ -20,7 +20,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-__version__ = "1.0.0"
+__version__ = "1.3.0"
 
 app = FastAPI(title="Deploy Service", version=__version__)
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
