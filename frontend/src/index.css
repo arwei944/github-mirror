@@ -41,7 +41,7 @@
 * { box-sizing: border-box; }
 
 body {
-  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'SF Pro Text', 'Helvetica Neue', sans-serif;
+  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'SF Pro Text', 'Helvetica Neue', 'PingFang SC', 'Microsoft YaHei', sans-serif;
   background: var(--mac-bg);
   color: var(--mac-text);
   -webkit-font-smoothing: antialiased;
@@ -67,8 +67,14 @@ body {
   border: 1px solid var(--mac-border);
   border-radius: var(--mac-radius);
   box-shadow: var(--mac-shadow);
+  transition: background 0.15s, box-shadow 0.15s;
 }
-.glass:hover { background: var(--mac-surface-hover); }
+
+/* Project card hover */
+.project-card:hover {
+  box-shadow: var(--mac-shadow-lg);
+  transform: translateY(-1px);
+}
 
 /* Mac button */
 .btn-primary {
@@ -110,3 +116,50 @@ body {
 .status-building { background: var(--mac-orange); animation: pulse-dot 1.2s ease-in-out infinite; }
 .status-error { background: var(--mac-red); }
 .status-idle { background: var(--mac-gray); }
+
+/* README body */
+.readme-body {
+  font-size: 14px;
+  line-height: 1.7;
+  color: var(--mac-text);
+}
+.readme-body h1 { font-size: 24px; font-weight: 700; margin: 24px 0 12px; padding-bottom: 8px; border-bottom: 1px solid var(--mac-border); }
+.readme-body h2 { font-size: 20px; font-weight: 600; margin: 20px 0 10px; padding-bottom: 6px; border-bottom: 1px solid var(--mac-border); }
+.readme-body h3 { font-size: 16px; font-weight: 600; margin: 16px 0 8px; }
+.readme-body p { margin: 8px 0; }
+.readme-body a { color: var(--mac-accent); text-decoration: none; }
+.readme-body a:hover { text-decoration: underline; }
+.readme-body code {
+  font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+  font-size: 13px;
+  background: var(--mac-gray);
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+.readme-body pre {
+  background: var(--mac-gray);
+  padding: 16px;
+  border-radius: 8px;
+  overflow-x: auto;
+  margin: 12px 0;
+}
+.readme-body pre code {
+  background: none;
+  padding: 0;
+  font-size: 13px;
+}
+.readme-body ul, .readme-body ol { padding-left: 24px; margin: 8px 0; }
+.readme-body li { margin: 4px 0; }
+.readme-body blockquote {
+  border-left: 3px solid var(--mac-accent);
+  padding: 8px 16px;
+  margin: 12px 0;
+  color: var(--mac-text-secondary);
+  background: var(--mac-surface);
+  border-radius: 0 8px 8px 0;
+}
+.readme-body img { max-width: 100%; border-radius: 8px; margin: 8px 0; }
+.readme-body table { border-collapse: collapse; width: 100%; margin: 12px 0; }
+.readme-body th, .readme-body td { border: 1px solid var(--mac-border); padding: 8px 12px; text-align: left; font-size: 13px; }
+.readme-body th { background: var(--mac-gray); font-weight: 600; }
+.readme-body hr { border: none; border-top: 1px solid var(--mac-border); margin: 20px 0; }

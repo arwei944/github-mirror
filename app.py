@@ -259,7 +259,68 @@ async def list_github_repos():
     req = urllib.request.Request(f"https://api.github.com/user/repos?per_page=100&sort=updated", headers={"Authorization": f"token {GITHUB_TOKEN}", "Accept": "application/vnd.github.v3+json"})
     try:
         resp = urllib.request.urlopen(req, timeout=15)
-        return [{"name": r["name"], "full_name": r["full_name"], "description": r.get("description", "") or "", "language": r.get("language", ""), "visibility": r["visibility"], "default_branch": r.get("default_branch", "main"), "updated_at": r["updated_at"], "html_url": r["html_url"]} for r in sorted(json.loads(resp.read()), key=lambda x: x["updated_at"], reverse=True)]
+        return [{"name": r["name"], "full_name": r["full_name"], "description": r.get("description", "") or "", "language": r.get("language", ""), "visibility": r["visibility"], "default_branch": r.get("default_branch", "main"), "updated_at": r["updated_at"], "html_url": r["html_url"], "topics": r.get("topics", []), "stargazers_count": r.get("stargazers_count", 0), "forks_count": r.get("forks_count", 0), "open_issues_count": r.get("open_issues_count", 0), "size": r.get("size", 0), "license": (r.get("license") or {}).get("spdx_id", ""), "created_at": r.get("created_at", ""), "pushed_at": r.get("pushed_at", ""), "archived": r.get("archived", False)} for r in sorted(json.loads(resp.read()), key=lambda x: x["updated_at"], reverse=True)]
+    except Exception as e:
+        raise HTTPException(502, f"GitHub API error: {e}")
+
+
+@app.get("/api/github/repos/{repo_name}/detail")
+async def get_repo_detail(repo_name: str):
+    import urllib.request
+    headers = {"Authorization": f"token {GITHUB_TOKEN}", "Accept": "application/vnd.github.v3+json"}
+    try:
+        req = urllib.request.Request(f"https://api.github.com/repos/{GITHUB_USER}/{repo_name}", headers=headers)
+        resp = urllib.request.urlopen(req, timeout=15)
+        repo = json.loads(resp.read())
+
+        readme_req = urllib.request.Request(f"https://api.github.com/repos/{GITHUB_USER}/{repo_name}/readme", headers={**headers, "Accept": "application/vnd.github.v3.html"})
+        try:
+            readme_resp = urllib.request.urlopen(readme_req, timeout=10)
+            readme_html = readme_resp.read().decode("utf-8")
+        except:
+            readme_html = ""
+
+        commits_req = urllib.request.Request(f"https://api.github.com/repos/{GITHUB_USER}/{repo_name}/commits?per_page=15", headers=headers)
+        try:
+            commits_resp = urllib.request.urlopen(commits_req, timeout=10)
+            commits = [{"sha": c["sha"][:7], "message": c["commit"]["message"].split("\n")[0], "author": c["commit"]["author"]["name"], "date": c["commit"]["author"]["date"], "avatar": c["author"]["avatar_url"] if c.get("author") else ""} for c in json.loads(commits_resp.read())]
+        except:
+            commits = []
+
+        branches_req = urllib.request.Request(f"https://api.github.com/repos/{GITHUB_USER}/{repo_name}/branches?per_page=50", headers=headers)
+        try:
+            branches_resp = urllib.request.urlopen(branches_req, timeout=10)
+            branches = [{"name": b["name"], "protected": b.get("protected", False)} for b in json.loads(branches_resp.read())]
+        except:
+            branches = []
+
+        contributors_req = urllib.request.Request(f"https://api.github.com/repos/{GITHUB_USER}/{repo_name}/contributors?per_page=10", headers=headers)
+        try:
+            contributors_resp = urllib.request.urlopen(contributors_req, timeout=10)
+            contributors = [{"login": c["login"], "avatar": c["avatar_url"], "contributions": c["contributions"], "html_url": c["html_url"]} for c in json.loads(contributors_resp.read())]
+        except:
+            contributors = []
+
+        langs_req = urllib.request.Request(f"https://api.github.com/repos/{GITHUB_USER}/{repo_name}/languages", headers=headers)
+        try:
+            langs_resp = urllib.request.urlopen(langs_req, timeout=10)
+            languages = json.loads(langs_resp.read())
+        except:
+            languages = {}
+
+        return {
+            "name": repo["name"], "full_name": repo["full_name"], "description": repo.get("description", "") or "",
+            "html_url": repo["html_url"], "language": repo.get("language", ""), "languages": languages,
+            "visibility": repo["visibility"], "default_branch": repo.get("default_branch", "main"),
+            "topics": repo.get("topics", []), "stargazers_count": repo.get("stargazers_count", 0),
+            "forks_count": repo.get("forks_count", 0), "open_issues_count": repo.get("open_issues_count", 0),
+            "size": repo.get("size", 0), "license": (repo.get("license") or {}).get("spdx_id", ""),
+            "created_at": repo.get("created_at", ""), "pushed_at": repo.get("pushed_at", ""),
+            "updated_at": repo.get("updated_at", ""), "archived": repo.get("archived", False),
+            "homepage": repo.get("homepage", "") or "",
+            "readme_html": readme_html, "commits": commits, "branches": branches,
+            "contributors": contributors,
+        }
     except Exception as e:
         raise HTTPException(502, f"GitHub API error: {e}")
 
