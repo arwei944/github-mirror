@@ -1198,6 +1198,25 @@ async def ping_webhook(repo_name: str, hook_id: int):
 
 
 # ──────────────────────────────────────────────
+# GitHub Branches API (v2.5.0)
+# ──────────────────────────────────────────────
+@app.get("/api/github/repos/{repo_name}/branches")
+async def list_branches(repo_name: str):
+    """获取仓库分支列表"""
+    if not GITHUB_TOKEN:
+        raise HTTPException(status_code=500, detail="未配置 GITHUB_TOKEN")
+    status, data = github_api_get(f"/repos/{GITHUB_USER}/{repo_name}/branches?per_page=100")
+    if status != 200:
+        raise HTTPException(status_code=status, detail=f"获取分支失败: {data}")
+    if not isinstance(data, list):
+        return []
+    # Get default branch from repo info
+    _, repo_data = github_api_get(f"/repos/{GITHUB_USER}/{repo_name}")
+    default_branch = repo_data.get("default_branch", "main") if isinstance(repo_data, dict) else "main"
+    return [{"name": b.get("name", ""), "default": b.get("name", "") == default_branch} for b in data]
+
+
+# ──────────────────────────────────────────────
 # GitHub Code Browse & Search API (v2.4.0)
 # ──────────────────────────────────────────────
 @app.get("/api/github/repos/{repo_name}/contents")
