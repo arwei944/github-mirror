@@ -4,6 +4,13 @@ import Repos from './pages/Repos'
 import Activity from './pages/Activity'
 import Deploy from './pages/Deploy'
 import RepoDetail from './pages/RepoDetail'
+import Issues from './pages/Issues'
+import IssueDetail from './pages/IssueDetail'
+import Pulls from './pages/Pulls'
+import PullDetail from './pages/PullDetail'
+import Actions from './pages/Actions'
+import CodeBrowse from './pages/CodeBrowse'
+import Search from './pages/Search'
 
 // ============ Icons ============
 const Icon = {
@@ -76,6 +83,18 @@ const Icon = {
   public: (s = 14) => (
     <svg width={s} height={s} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path d="M2 3h6a4 4 0 014 4v14a3 3 0 00-3-3H2z"/><path d="M22 3h-6a4 4 0 00-4 4v14a3 3 0 013-3h7z"/></svg>
   ),
+  folder: (s = 14) => (
+    <svg width={s} height={s} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z"/></svg>
+  ),
+  file: (s = 14) => (
+    <svg width={s} height={s} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+  ),
+  zap: (s = 14) => (
+    <svg width={s} height={s} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+  ),
+  tag: (s = 14) => (
+    <svg width={s} height={s} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path d="M20.59 13.41l-7.17 7.17a2 2 0 01-2.83 0L2 12V2h10l8.59 8.59a2 2 0 010 2.82z"/><line x1="7" y1="7" x2="7.01" y2="7"/></svg>
+  ),
 }
 
 export { Icon }
@@ -84,6 +103,8 @@ export { Icon }
 export default function App() {
   const [currentPage, setCurrentPage] = useState('repos')
   const [selectedRepo, setSelectedRepo] = useState(null)
+  const [selectedIssue, setSelectedIssue] = useState(null)
+  const [selectedPull, setSelectedPull] = useState(null)
   const [githubRepos, setGithubRepos] = useState([])
   const [projects, setProjects] = useState([])
   const [hfSpaces, setHfSpaces] = useState([])
@@ -94,7 +115,7 @@ export default function App() {
       api.get('/api/github/repos').catch(() => []),
       api.get('/api/projects').catch(() => []),
       api.get('/api/hf/spaces').catch(() => []),
-      api.get('/api/github/events').catch(() => []),
+      api.get('/api/github/activity').catch(() => []),
     ])
     setGithubRepos(g || [])
     setProjects(p || [])
@@ -123,13 +144,48 @@ export default function App() {
     setCurrentPage('repos')
   }
 
+  const handleSelectIssue = (repoName, issueNumber) => {
+    setSelectedRepo(repoName)
+    setSelectedIssue(issueNumber)
+    setCurrentPage('issue-detail')
+  }
+
+  const handleIssueBack = () => {
+    setSelectedIssue(null)
+    setCurrentPage('issues')
+  }
+
+  const handleSelectPull = (repoName, pullNumber) => {
+    setSelectedRepo(repoName)
+    setSelectedPull(pullNumber)
+    setCurrentPage('pull-detail')
+  }
+
+  const handlePullBack = () => {
+    setSelectedPull(null)
+    setCurrentPage('pulls')
+  }
+
+  const navigateTo = (page) => {
+    setSelectedRepo(null)
+    setSelectedIssue(null)
+    setSelectedPull(null)
+    setCurrentPage(page)
+  }
+
   const navItems = [
     { key: 'repos', label: '仓库', icon: Icon.github(16) },
+    { key: 'issues', label: 'Issues', icon: Icon.issue(16) },
+    { key: 'pulls', label: 'Pull Requests', icon: Icon.pr(16) },
+    { key: 'actions', label: 'Actions', icon: Icon.zap(16) },
+    { key: 'code', label: '代码浏览', icon: Icon.code(16) },
+    { key: 'search', label: '搜索', icon: Icon.search(16) },
     { key: 'activity', label: '活动流', icon: Icon.activity(16) },
     { key: 'deploy', label: '部署管理', icon: Icon.deploy(16) },
   ]
 
   const renderContent = () => {
+    // Detail pages (with back navigation)
     if (currentPage === 'detail' && selectedRepo) {
       return (
         <RepoDetail
@@ -141,6 +197,26 @@ export default function App() {
         />
       )
     }
+    if (currentPage === 'issue-detail' && selectedRepo && selectedIssue) {
+      return (
+        <IssueDetail
+          repoName={selectedRepo}
+          issueNumber={selectedIssue}
+          onBack={handleIssueBack}
+        />
+      )
+    }
+    if (currentPage === 'pull-detail' && selectedRepo && selectedPull) {
+      return (
+        <PullDetail
+          repoName={selectedRepo}
+          pullNumber={selectedPull}
+          onBack={handlePullBack}
+        />
+      )
+    }
+
+    // Main pages
     switch (currentPage) {
       case 'repos':
         return (
@@ -148,6 +224,39 @@ export default function App() {
             githubRepos={githubRepos}
             projects={projects}
             hfSpaces={hfSpaces}
+            onSelectRepo={handleSelectRepo}
+          />
+        )
+      case 'issues':
+        return (
+          <Issues
+            githubRepos={githubRepos}
+            onSelectIssue={handleSelectIssue}
+          />
+        )
+      case 'pulls':
+        return (
+          <Pulls
+            githubRepos={githubRepos}
+            onSelectPull={handleSelectPull}
+          />
+        )
+      case 'actions':
+        return (
+          <Actions
+            githubRepos={githubRepos}
+          />
+        )
+      case 'code':
+        return (
+          <CodeBrowse
+            githubRepos={githubRepos}
+          />
+        )
+      case 'search':
+        return (
+          <Search
+            githubRepos={githubRepos}
             onSelectRepo={handleSelectRepo}
           />
         )
@@ -181,7 +290,7 @@ export default function App() {
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <span style={{ color: 'var(--mac-text)' }}>{Icon.github(18)}</span>
             <span style={{ fontSize: 15, fontWeight: 600, letterSpacing: '-0.02em' }}>GitHub Mirror</span>
-            <span style={{ fontSize: 9, padding: '1px 6px', borderRadius: 8, background: 'var(--mac-accent)', color: 'white', fontWeight: 500 }}>v2.0</span>
+            <span style={{ fontSize: 9, padding: '1px 6px', borderRadius: 8, background: 'var(--mac-accent)', color: 'white', fontWeight: 500 }}>v2.4</span>
           </div>
         </div>
 
@@ -190,11 +299,8 @@ export default function App() {
           {navItems.map(item => (
             <div
               key={item.key}
-              className={`nav-item ${currentPage === item.key ? 'active' : ''}`}
-              onClick={() => {
-                setSelectedRepo(null)
-                setCurrentPage(item.key)
-              }}
+              className={`nav-item ${currentPage === item.key || (item.key === 'issues' && currentPage === 'issue-detail') || (item.key === 'pulls' && currentPage === 'pull-detail') ? 'active' : ''}`}
+              onClick={() => navigateTo(item.key)}
             >
               {item.icon}
               {item.label}
