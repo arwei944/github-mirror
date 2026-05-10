@@ -105,40 +105,44 @@ function timeAgo(dateStr) {
 }
 
 function getEventText(event) {
+  // 优先使用后端提供的 detail 字段
+  if (event.detail) {
+    return event.detail
+  }
+  // 回退到原始逻辑
   const t = event.type || ''
   const p = event.payload || {}
-  const repo = (event.repo || {}).name || ''
-  const repoShort = repo.split('/').pop() || repo
-
+  const repo = event.full_repo_name || event.repo_name || (event.repo || {}).name || ''
+  
   switch (t) {
     case 'PushEvent':
-      return `${repoShort} · ${p.commits?.length || 0} 个提交推送到 ${(p.ref || '').replace('refs/heads/', '')}`
+      const commitCount = event.commit_count || p.size || p.commits?.length || 0
+      const ref = (event.ref || p.ref || '').replace('refs/heads/', '')
+      return `推送了 ${commitCount} 个提交到 ${ref}`
     case 'PullRequestEvent':
-      const pr = p.pull_request || {}
-      const prActionMap = { opened: '创建了', closed: '关闭了', merged: '合并了', reopened: '重新打开了' }
-      return `${repoShort} · ${prActionMap[p.action] || p.action || ''} PR #${pr.number}`
+      const prNum = event.pr_number || p.pull_request?.number
+      const prTitle = event.pr_title || p.pull_request?.title
+      return `PR #${prNum}: ${prTitle || ''}`
     case 'IssuesEvent':
-      const issue = p.issue || {}
-      return `${repoShort} · Issue #${issue.number} ${p.action || ''}`
+      const issueNum = event.issue_number || p.issue?.number
+      const issueTitle = event.issue_title || p.issue?.title
+      return `Issue #${issueNum}: ${issueTitle || ''}`
     case 'IssueCommentEvent':
-      return `${repoShort} · 评论了 Issue #${p.issue?.number || ''}`
-    case 'PullRequestReviewEvent':
-      return `${repoShort} · 审查了 PR #${p.pull_request?.number || ''}`
+      return `评论了 Issue #${event.issue_number || p.issue?.number || ''}`
     case 'StarEvent':
-      return `${repoShort} · 被星标`
-    case 'CreateEvent':
-      return `${repoShort} · 创建了 ${p.ref_type || ''} ${(p.ref || '').replace('refs/heads/', '')}`
-    case 'DeleteEvent':
-      return `${repoShort} · 删除了 ${p.ref_type || ''}`
+      return `星标了 ${repo}`
     case 'ForkEvent':
-      return `${repoShort} · 被复刻`
-    case 'ReleaseEvent':
-      const rel = p.release || {}
-      return `${repoShort} · 发布了 ${rel.name || rel.tag_name || ''}`
+      return `复刻了 ${repo}`
     case 'WatchEvent':
-      return `${repoShort} · 被关注`
+      return `关注了 ${repo}`
+    case 'CreateEvent':
+      return `创建了 ${p.ref_type || ''} ${(p.ref || '').replace('refs/heads/', '')}`
+    case 'DeleteEvent':
+      return `删除了 ${p.ref_type || ''}`
+    case 'ReleaseEvent':
+      return `发布了 ${p.release?.name || p.release?.tag_name || ''}`
     default:
-      return `${repoShort} · ${t.replace('Event', '')}`
+      return repo || event.type_label || t.replace('Event', '')
   }
 }
 
@@ -153,6 +157,7 @@ const cardStyle = {
 export default function Dashboard({ githubRepos, onSelectRepo, onNavigate }) {
   const [activities, setActivities] = useState([])
   const [starred, setStarred] = useState([])
+  const [trending, setTrending] = useState([])
   const [stats, setStats] = useState({ repos: 0, stars: 0, issues: 0, prs: 0, forks: 0 })
   const [loading, setLoading] = useState(true)
 
@@ -161,12 +166,14 @@ export default function Dashboard({ githubRepos, onSelectRepo, onNavigate }) {
   const loadData = useCallback(async () => {
     setLoading(true)
     try {
-      const [act, star] = await Promise.all([
+      const [act, star, trend] = await Promise.all([
         api.get('/api/github/activity').catch(() => []),
         api.get('/api/github/user/starred?sort=updated&per_page=5').catch(() => []),
+        api.get('/api/github/trending?since=daily').catch(() => []),
       ])
       setActivities(Array.isArray(act) ? act.slice(0, 15) : [])
       setStarred(Array.isArray(star) ? star : [])
+      setTrending(Array.isArray(trend) ? trend : [])
 
       // Calculate stats from repos
       const totalStars = repos.reduce((s, r) => s + (r.stargazers_count || 0), 0)
@@ -194,8 +201,6 @@ export default function Dashboard({ githubRepos, onSelectRepo, onNavigate }) {
     { label: 'Issues', value: stats.issues, icon: Icon.issue(18, '#f85149'), color: '#f85149' },
     { label: 'Forks', value: stats.forks, icon: Icon.fork(18, '#8b5cf6'), color: '#8b5cf6' },
   ]
-
-  const topRepos = [...repos].sort((a, b) => (b.stargazers_count || 0) - (a.stargazers_count || 0)).slice(0, 5)
 
   return (
     <div className="animate-fade-in" style={{ padding: 20, height: '100%', overflow: 'auto' }}>
@@ -281,25 +286,19 @@ export default function Dashboard({ githubRepos, onSelectRepo, onNavigate }) {
 
         {/* Right column */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-          {/* Top repos */}
+          {/* Trending repos */}
           <div style={cardStyle}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
               <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--mac-text)', display: 'flex', alignItems: 'center', gap: 6 }}>
-                {Icon.star(14, '#d29922')} 热门仓库
+                {Icon.activity(16, '#3fb950')} GitHub 热门项目
               </span>
-              {onNavigate && (
-                <button onClick={() => onNavigate('repos')} style={{
-                  background: 'none', border: 'none', color: 'var(--mac-accent)',
-                  cursor: 'pointer', fontSize: 11, display: 'flex', alignItems: 'center', gap: 2,
-                }}>查看全部 {Icon.arrowRight(10)}</button>
-              )}
             </div>
-            {topRepos.length === 0 ? (
-              <div style={{ textAlign: 'center', padding: 20, color: 'var(--mac-text-secondary)', fontSize: 12 }}>暂无仓库</div>
+            {trending.length === 0 ? (
+              <div style={{ textAlign: 'center', padding: 20, color: 'var(--mac-text-secondary)', fontSize: 12 }}>加载中...</div>
             ) : (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                {topRepos.map((repo, i) => (
-                  <div key={i} onClick={() => onSelectRepo?.(repo.name)} style={{
+                {trending.map((repo, i) => (
+                  <div key={i} onClick={() => window.open(repo.html_url, '_blank')} style={{
                     display: 'flex', alignItems: 'center', gap: 10, padding: '6px 8px',
                     borderRadius: 8, cursor: 'pointer', transition: 'background 0.15s',
                   }}
@@ -308,10 +307,12 @@ export default function Dashboard({ githubRepos, onSelectRepo, onNavigate }) {
                   >
                     <img src={repo.owner?.avatar_url} alt="" style={{ width: 24, height: 24, borderRadius: '50%' }} />
                     <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontSize: 12, fontWeight: 500, color: 'var(--mac-text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                        {repo.name}
+                      <div style={{ fontSize: 12, fontWeight: 500, color: 'var(--mac-accent)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {repo.full_name || repo.name}
                       </div>
-                      <div style={{ fontSize: 10, color: 'var(--mac-text-secondary)' }}>{repo.language || 'Unknown'}</div>
+                      <div style={{ fontSize: 10, color: 'var(--mac-text-secondary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {repo.description?.slice(0, 50) || repo.language || ''}
+                      </div>
                     </div>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 3, fontSize: 11, color: 'var(--mac-text-secondary)' }}>
                       {Icon.star(10, '#d29922')}<span>{repo.stargazers_count || 0}</span>
