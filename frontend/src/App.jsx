@@ -491,7 +491,7 @@ export default function App() {
       <div className="mobile-header">
         <HamburgerMenu isOpen={sidebarOpen} onClick={() => setSidebarOpen(prev => !prev)} />
         <span style={{ fontSize: 15, fontWeight: 600, letterSpacing: '-0.02em' }}>GitHub Mirror</span>
-        <span style={{ fontSize: 9, padding: '1px 6px', borderRadius: 8, background: 'var(--mac-accent)', color: 'white', fontWeight: 500 }}>v5.4</span>
+        <span style={{ fontSize: 9, padding: '1px 6px', borderRadius: 8, background: 'var(--mac-accent)', color: 'white', fontWeight: 500 }}>v5.4.2</span>
       </div>
 
       {/* Mobile sidebar overlay */}
@@ -506,7 +506,7 @@ export default function App() {
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <span style={{ color: 'var(--mac-text)' }}>{Icon.github(18)}</span>
             <span className="sidebar-title" style={{ fontSize: 15, fontWeight: 600, letterSpacing: '-0.02em' }}>GitHub Mirror</span>
-            <span className="sidebar-version" style={{ fontSize: 9, padding: '1px 6px', borderRadius: 8, background: 'var(--mac-accent)', color: 'white', fontWeight: 500 }}>v5.4</span>
+            <span className="sidebar-version" style={{ fontSize: 9, padding: '1px 6px', borderRadius: 8, background: 'var(--mac-accent)', color: 'white', fontWeight: 500 }}>v5.4.2</span>
           </div>
           {/* Theme toggle */}
           <button

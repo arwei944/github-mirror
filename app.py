@@ -20,7 +20,7 @@ from fastapi import FastAPI, Query, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 
-__version__ = "5.4.0"
+__version__ = "5.4.2"
 
 app = FastAPI(
     version=__version__,
@@ -3868,11 +3868,14 @@ async def stats_punch_card(repo_name: str):
 
 @app.get("/api/github/user/starred")
 async def get_starred_repos(request: Request):
-    """获取星标仓库列表 (v5.4.0)"""
+    """获取星标仓库列表 (v5.4.0) - 用户收藏的他人项目"""
     params = dict(request.query_params)
     params.setdefault("per_page", "30")
     params.setdefault("sort", "updated")
-    return github_api_get("/user/starred", params=params)
+    data, status = github_api_get("/user/starred", params=params)
+    if status == 200 and isinstance(data, list):
+        return data
+    return []
 
 @app.get("/api/github/repos/{repo_name}/readme")
 async def get_readme(repo_name: str):
@@ -3925,6 +3928,63 @@ async def get_commits(repo_name: str, request: Request):
     if branch:
         params["sha"] = branch
     return github_api_get(f"/repos/{repo_name}/commits", params=params)
+
+
+# ──────────────────────────────────────────────
+# GitHub Trending API (v5.4.2)
+# ──────────────────────────────────────────────
+@app.get("/api/github/trending")
+async def get_trending_repos(
+    language: str = Query("", description="编程语言过滤"),
+    since: str = Query("daily", description="时间范围: daily, weekly, monthly"),
+):
+    """获取 GitHub 热门项目 (v5.4.2) - 通过搜索 API 模拟"""
+    # GitHub 没有 official trending API，使用搜索 API 模拟
+    # 搜索最近创建/更新的热门项目
+    query_parts = ["stars:>100", "fork:true"]
+    if language:
+        query_parts.append(f"language:{language}")
+    
+    # 根据时间范围调整
+    from datetime import datetime, timedelta
+    if since == "weekly":
+        since_date = (datetime.utcnow() - timedelta(days=7)).strftime("%Y-%m-%d")
+        query_parts.append(f"pushed:>{since_date}")
+    elif since == "monthly":
+        since_date = (datetime.utcnow() - timedelta(days=30)).strftime("%Y-%m-%d")
+        query_parts.append(f"pushed:>{since_date}")
+    else:  # daily
+        since_date = (datetime.utcnow() - timedelta(days=1)).strftime("%Y-%m-%d")
+        query_parts.append(f"pushed:>{since_date}")
+    
+    query = " ".join(query_parts)
+    params = {
+        "q": query,
+        "sort": "stars",
+        "order": "desc",
+        "per_page": "10",
+    }
+    
+    data, status = github_api_get("/search/repositories", params=params)
+    if status == 200 and data:
+        items = data.get("items", [])
+        # 格式化返回数据
+        return [{
+            "name": item.get("name", ""),
+            "full_name": item.get("full_name", ""),
+            "description": item.get("description", ""),
+            "language": item.get("language", ""),
+            "stargazers_count": item.get("stargazers_count", 0),
+            "forks_count": item.get("forks_count", 0),
+            "open_issues_count": item.get("open_issues_count", 0),
+            "html_url": item.get("html_url", ""),
+            "owner": {
+                "login": item.get("owner", {}).get("login", ""),
+                "avatar_url": item.get("owner", {}).get("avatar_url", ""),
+            },
+            "pushed_at": item.get("pushed_at", ""),
+        } for item in items]
+    return []
 
 
 # ──────────────────────────────────────────────
