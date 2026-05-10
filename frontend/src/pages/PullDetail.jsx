@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { Icon } from '../App'
 import api from '../api'
+import DiffViewer from '../components/DiffViewer'
 
 function timeAgo(dateStr) {
   if (!dateStr) return ''
@@ -306,6 +307,7 @@ export default function PullDetail({ repoName, pullNumber, onBack }) {
   const tabs = [
     { key: 'details', label: '详情' },
     { key: 'files', label: `文件变更 (${changedFiles.length})` },
+    { key: 'diff', label: '差异' },
     { key: 'commits', label: '提交' },
     { key: 'reviews', label: `审查 (${reviews.length})` },
     { key: 'review-comments', label: '审查评论' },
@@ -494,6 +496,13 @@ export default function PullDetail({ repoName, pullNumber, onBack }) {
                 ))}
               </div>
             )
+          )}
+
+          {/* Diff tab */}
+          {tab === 'diff' && (
+            <div style={{ height: 500 }}>
+              <DiffViewer repoName={repoName} pullNumber={pullNumber} />
+            </div>
           )}
 
           {/* Reviews tab */}

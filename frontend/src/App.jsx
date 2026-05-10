@@ -139,6 +139,10 @@ export default function App() {
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false)
   const toast = useToast()
 
+  const [unreadCount, setUnreadCount] = useState(() => {
+    return parseInt(sessionStorage.getItem('github-mirror-unread') || '0', 10)
+  })
+
   // Apply theme
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme)
@@ -226,6 +230,10 @@ export default function App() {
     setSelectedPull(null)
     setCurrentPage(page)
     setSidebarOpen(false)
+    if (page === 'activity') {
+      setUnreadCount(0)
+      sessionStorage.setItem('github-mirror-unread', '0')
+    }
   }
 
   const navItems = [
@@ -238,7 +246,7 @@ export default function App() {
     { key: 'discussions', label: '讨论区', icon: Icon.messageCircle(16) },
     { key: 'profile', label: '个人中心', icon: Icon.users(16) },
     { key: 'settings', label: '设置', icon: Icon.tag(16) },
-    { key: 'activity', label: '活动流', icon: Icon.activity(16) },
+    { key: 'activity', label: '活动流', icon: Icon.activity(16), badge: unreadCount },
     { key: 'security', label: '安全中心', icon: Icon.zap(16) },
     { key: 'deploy', label: '部署管理', icon: Icon.deploy(16) },
   ]
@@ -264,6 +272,31 @@ export default function App() {
     'ctrl+8': () => navigateTo('settings'),
     'ctrl+9': () => navigateTo('security'),
   })
+
+  // SSE event listener for real-time notifications
+  useEffect(() => {
+    let eventSource = null
+    try {
+      eventSource = new EventSource('/api/events/stream')
+      eventSource.onmessage = (event) => {
+        try {
+          const msg = JSON.parse(event.data)
+          if (msg.type === 'event') {
+            setUnreadCount(prev => {
+              const next = Math.min(prev + 1, 999)
+              sessionStorage.setItem('github-mirror-unread', String(next))
+              return next
+            })
+          }
+        } catch (e) {}
+      }
+      eventSource.onerror = () => {
+        // SSE not available, silently fail
+        if (eventSource) eventSource.close()
+      }
+    } catch (e) {}
+    return () => { if (eventSource) eventSource.close() }
+  }, [])
 
   const renderContent = () => {
     // Detail pages (with back navigation)
@@ -418,7 +451,7 @@ export default function App() {
       <div className="mobile-header">
         <HamburgerMenu isOpen={sidebarOpen} onClick={() => setSidebarOpen(prev => !prev)} />
         <span style={{ fontSize: 15, fontWeight: 600, letterSpacing: '-0.02em' }}>GitHub Mirror</span>
-        <span style={{ fontSize: 9, padding: '1px 6px', borderRadius: 8, background: 'var(--mac-accent)', color: 'white', fontWeight: 500 }}>v5.1</span>
+        <span style={{ fontSize: 9, padding: '1px 6px', borderRadius: 8, background: 'var(--mac-accent)', color: 'white', fontWeight: 500 }}>v5.2</span>
       </div>
 
       {/* Mobile sidebar overlay */}
@@ -433,7 +466,7 @@ export default function App() {
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <span style={{ color: 'var(--mac-text)' }}>{Icon.github(18)}</span>
             <span className="sidebar-title" style={{ fontSize: 15, fontWeight: 600, letterSpacing: '-0.02em' }}>GitHub Mirror</span>
-            <span className="sidebar-version" style={{ fontSize: 9, padding: '1px 6px', borderRadius: 8, background: 'var(--mac-accent)', color: 'white', fontWeight: 500 }}>v5.1</span>
+            <span className="sidebar-version" style={{ fontSize: 9, padding: '1px 6px', borderRadius: 8, background: 'var(--mac-accent)', color: 'white', fontWeight: 500 }}>v5.2</span>
           </div>
           {/* Theme toggle */}
           <button
@@ -453,9 +486,20 @@ export default function App() {
               className={`nav-item ${currentPage === item.key || (item.key === 'issues' && currentPage === 'issue-detail') || (item.key === 'pulls' && currentPage === 'pull-detail') ? 'active' : ''}`}
               onClick={() => navigateTo(item.key)}
               title={item.label}
+              style={{ position: 'relative' }}
             >
               {item.icon}
               <span className="nav-label">{item.label}</span>
+              {item.badge > 0 && (
+                <span style={{
+                  position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)',
+                  background: '#ff3b30', color: 'white', fontSize: 9, fontWeight: 600,
+                  minWidth: 16, height: 16, borderRadius: 8, display: 'flex',
+                  alignItems: 'center', justifyContent: 'center', padding: '0 4px',
+                }}>
+                  {item.badge > 99 ? '99+' : item.badge}
+                </span>
+              )}
             </div>
           ))}
         </nav>

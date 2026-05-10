@@ -20,7 +20,7 @@ from fastapi import FastAPI, Query, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 
-__version__ = "5.1.0"
+__version__ = "5.2.0"
 
 app = FastAPI(
     version=__version__,
@@ -3636,6 +3636,160 @@ async def add_discussion_comment(repo_name: str, discussion_id: str, request: Re
     if "errors" in result:
         raise HTTPException(status_code=400, detail=result["errors"][0].get("message", "GraphQL error"))
     return result.get("data", {}).get("addDiscussionComment", {}).get("comment", {})
+
+
+# ──────────────────────────────────────────────
+# 实时事件系统 (v5.2.0)
+# ──────────────────────────────────────────────
+from fastapi import WebSocket, WebSocketDisconnect
+from starlette.concurrency import iterate_in_threadpool
+from collections import deque
+import asyncio
+import hashlib
+import hmac
+import json as _json
+
+# 事件队列（内存，最近 100 条）
+event_queue = deque(maxlen=100)
+# WebSocket 连接管理
+ws_clients: list[WebSocket] = []
+# Webhook 密钥
+WEBHOOK_SECRET = os.environ.get("WEBHOOK_SECRET", "")
+
+
+class ConnectionManager:
+    """WebSocket 连接管理器"""
+    def __init__(self):
+        self.active_connections: list[WebSocket] = []
+
+    async def connect(self, websocket: WebSocket):
+        await websocket.accept()
+        self.active_connections.append(websocket)
+
+    def disconnect(self, websocket: WebSocket):
+        if websocket in self.active_connections:
+            self.active_connections.remove(websocket)
+
+    async def broadcast(self, message: dict):
+        disconnected = []
+        for connection in self.active_connections:
+            try:
+                await connection.send_json(message)
+            except Exception:
+                disconnected.append(connection)
+        for conn in disconnected:
+            self.disconnect(conn)
+
+ws_manager = ConnectionManager()
+
+
+@app.websocket("/ws/events")
+async def websocket_events(websocket: WebSocket):
+    """WebSocket 实时事件端点"""
+    await ws_manager.connect(websocket)
+    try:
+        # Send recent events on connect
+        for event in list(event_queue)[-20:]:
+            await websocket.send_json({"type": "event", "data": event})
+        # Heartbeat loop
+        while True:
+            try:
+                # Wait for messages (client can send pong)
+                data = await asyncio.wait_for(websocket.receive_text(), timeout=30)
+                if data == "pong":
+                    continue
+            except asyncio.TimeoutError:
+                # Send ping
+                try:
+                    await websocket.send_json({"type": "ping"})
+                except Exception:
+                    break
+    except WebSocketDisconnect:
+        ws_manager.disconnect(websocket)
+    except Exception:
+        ws_manager.disconnect(websocket)
+
+
+@app.get("/api/events/stream")
+async def sse_events(request: Request):
+    """SSE 降级端点 (v5.2.0) - HF Spaces 备选方案"""
+    import asyncio
+
+    async def event_generator():
+        # Send recent events first
+        for event in list(event_queue)[-20:]:
+            yield f"data: {_json.dumps({'type': 'event', 'data': event})}\n\n"
+        # Then stream new events
+        last_index = len(event_queue)
+        while True:
+            if len(event_queue) > last_index:
+                for event in list(event_queue)[last_index:]:
+                    yield f"data: {_json.dumps({'type': 'event', 'data': event})}\n\n"
+                last_index = len(event_queue)
+            await asyncio.sleep(2)
+            # Send keepalive
+            yield f": keepalive\n\n"
+
+    from starlette.responses import StreamingResponse
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+@app.post("/api/webhook/receiver")
+async def webhook_receiver(request: Request):
+    """GitHub Webhook 接收器 (v5.2.0)"""
+    # Verify signature if secret is configured
+    if WEBHOOK_SECRET:
+        signature = request.headers.get("X-Hub-Signature-256", "")
+        body = await request.body()
+        expected = "sha256=" + hmac.new(
+            WEBHOOK_SECRET.encode(), body, hashlib.sha256
+        ).hexdigest()
+        if not hmac.compare_digest(signature, expected):
+            raise HTTPException(status_code=401, detail="Invalid signature")
+        try:
+            payload = _json.loads(body)
+        except Exception:
+            raise HTTPException(status_code=400, detail="Invalid JSON")
+    else:
+        try:
+            payload = await request.json()
+        except Exception:
+            raise HTTPException(status_code=400, detail="Invalid JSON")
+
+    # Parse event
+    event_type = request.headers.get("X-GitHub-Event", "unknown")
+    event_data = {
+        "event_type": event_type,
+        "repo": payload.get("repository", {}).get("full_name", "unknown"),
+        "actor": {
+            "login": payload.get("sender", {}).get("login", "unknown"),
+            "avatar_url": payload.get("sender", {}).get("avatar_url", ""),
+        },
+        "payload": payload,
+        "created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+    }
+
+    # Add to event queue
+    event_queue.append(event_data)
+
+    # Broadcast to WebSocket clients
+    await ws_manager.broadcast({"type": "event", "data": event_data})
+
+    return {"status": "ok", "event_type": event_type}
+
+
+@app.get("/api/events/recent")
+async def recent_events():
+    """获取最近事件 (v5.2.0)"""
+    return {"status": "ok", "events": list(event_queue)}
 
 
 # ──────────────────────────────────────────────
