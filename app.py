@@ -648,7 +648,7 @@ async def get_aggregated_activity(
     all_events = []
     seen_ids = set()
 
-    # 1. 获取用户事件
+    # 1. 获取用户事件（带 Token 可获取私有仓库的公开活动）
     status, user_events = github_api_get(f"/users/{GITHUB_USER}/events?per_page=30")
     if status == 200 and isinstance(user_events, list):
         for event in user_events:
@@ -656,15 +656,17 @@ async def get_aggregated_activity(
                 all_events.append(enrich_event(event))
                 seen_ids.add(event.get("id"))
 
-    # 2. 获取用户仓库列表
-    status, repos = github_api_get(f"/users/{GITHUB_USER}/repos?per_page=30&sort=updated")
+    # 2. 获取用户仓库列表（包含私有仓库）
+    status, repos = github_api_get(f"/user/repos?per_page=30&sort=updated&type=all")
     if status == 200 and isinstance(repos, list):
-        # 只获取最近更新的5个仓库的事件
-        for repo in repos[:5]:
+        # 获取最近更新的仓库的事件
+        for repo in repos[:10]:
             repo_name = repo.get("name", "")
             if not repo_name:
                 continue
-            status, repo_events = github_api_get(f"/repos/{GITHUB_USER}/{repo_name}/events?per_page=10")
+            # 使用 /repos/{owner}/{repo}/events?per_page=5 获取仓库事件
+            # 注意：此 API 对私有仓库可能返回 404，需要容错
+            status, repo_events = github_api_get(f"/repos/{GITHUB_USER}/{repo_name}/events?per_page=5")
             if status == 200 and isinstance(repo_events, list):
                 for event in repo_events:
                     event_id = event.get("id")
@@ -672,7 +674,41 @@ async def get_aggregated_activity(
                         all_events.append(enrich_event(event))
                         seen_ids.add(event_id)
 
-    # 3. 按时间排序
+    # 3. 对私有仓库，尝试通过 commits API 获取最近提交作为补充
+    status, repos = github_api_get(f"/user/repos?per_page=30&sort=updated&type=private")
+    if status == 200 and isinstance(repos, list):
+        for repo in repos[:5]:
+            repo_name = repo.get("name", "")
+            if not repo_name:
+                continue
+            # 检查是否已有该仓库的事件
+            has_events = any(e.get("repo_name") == repo_name for e in all_events)
+            if has_events:
+                continue
+            # 通过 commits API 获取最近提交
+            status, commits = github_api_get(f"/repos/{GITHUB_USER}/{repo_name}/commits?per_page=3")
+            if status == 200 and isinstance(commits, list):
+                for commit in commits:
+                    fake_event = {
+                        "id": f"commit-{repo_name}-{commit.get('sha', '')[:8]}",
+                        "type": "PushEvent",
+                        "repo": {"name": f"{GITHUB_USER}/{repo_name}"},
+                        "payload": {
+                            "ref": "refs/heads/main",
+                            "head": commit.get("sha", ""),
+                            "before": "0000000000000000000000000000000000000000",
+                            "commits": [{"message": commit.get("commit", {}).get("message", "")}],
+                            "size": 1,
+                        },
+                        "created_at": commit.get("commit", {}).get("author", {}).get("date", ""),
+                        "actor": {"login": commit.get("commit", {}).get("author", {}).get("name", GITHUB_USER)},
+                    }
+                    event_id = fake_event["id"]
+                    if event_id not in seen_ids:
+                        all_events.append(enrich_event(fake_event))
+                        seen_ids.add(event_id)
+
+    # 4. 按时间排序
     all_events.sort(key=lambda x: x.get("created_at", ""), reverse=True)
 
     return all_events[:per_page]
