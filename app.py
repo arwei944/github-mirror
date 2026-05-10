@@ -20,7 +20,7 @@ from fastapi import FastAPI, Query, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 
-__version__ = "5.2.0"
+__version__ = "5.3.0"
 
 app = FastAPI(
     version=__version__,
@@ -3790,6 +3790,76 @@ async def webhook_receiver(request: Request):
 async def recent_events():
     """获取最近事件 (v5.2.0)"""
     return {"status": "ok", "events": list(event_queue)}
+
+
+# ──────────────────────────────────────────────
+# 仓库统计 API (v5.3.0)
+# ──────────────────────────────────────────────
+import asyncio as _asyncio
+
+stats_cache = TTLCache(default_ttl=600)  # 10 min TTL for stats
+
+
+async def _fetch_stats_with_retry(path: str, max_retries: int = 5, interval: int = 3):
+    """GitHub Stats API 首次请求可能返回 202，需轮询等待"""
+    for attempt in range(max_retries):
+        data, status = github_api_get(path)
+        if status == 200 and data is not None:
+            return data
+        if status == 202:
+            await _asyncio.sleep(interval)
+            continue
+        # Other errors: return as-is
+        return data or []
+    return []
+
+
+@app.get("/api/github/repos/{repo_name}/stats/commit-activity")
+async def stats_commit_activity(repo_name: str):
+    """提交活动统计 (v5.3.0)"""
+    cache_key = f"stats:commit-activity:{repo_name}"
+    cached = stats_cache.get(cache_key)
+    if cached is not None:
+        return cached
+    data = await _fetch_stats_with_retry(f"/repos/{repo_name}/stats/commit_activity")
+    stats_cache.set(cache_key, data, ttl=600)
+    return data
+
+
+@app.get("/api/github/repos/{repo_name}/stats/code-frequency")
+async def stats_code_frequency(repo_name: str):
+    """代码频率统计 (v5.3.0)"""
+    cache_key = f"stats:code-frequency:{repo_name}"
+    cached = stats_cache.get(cache_key)
+    if cached is not None:
+        return cached
+    data = await _fetch_stats_with_retry(f"/repos/{repo_name}/stats/code_frequency")
+    stats_cache.set(cache_key, data, ttl=600)
+    return data
+
+
+@app.get("/api/github/repos/{repo_name}/stats/participation")
+async def stats_participation(repo_name: str):
+    """参与者统计 (v5.3.0)"""
+    cache_key = f"stats:participation:{repo_name}"
+    cached = stats_cache.get(cache_key)
+    if cached is not None:
+        return cached
+    data = await _fetch_stats_with_retry(f"/repos/{repo_name}/stats/participation")
+    stats_cache.set(cache_key, data, ttl=600)
+    return data
+
+
+@app.get("/api/github/repos/{repo_name}/stats/punch-card")
+async def stats_punch_card(repo_name: str):
+    """提交时间分布 (v5.3.0)"""
+    cache_key = f"stats:punch-card:{repo_name}"
+    cached = stats_cache.get(cache_key)
+    if cached is not None:
+        return cached
+    data = await _fetch_stats_with_retry(f"/repos/{repo_name}/stats/punch_card")
+    stats_cache.set(cache_key, data, ttl=600)
+    return data
 
 
 # ──────────────────────────────────────────────
