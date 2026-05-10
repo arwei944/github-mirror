@@ -195,23 +195,32 @@ function CommitTimeline({ repoName, branch }) {
 
   return (
     <div>
-      {commits.map((commit, i) => (
-        <div key={i} style={{ display: 'flex', gap: 12, padding: '10px 0', borderBottom: '1px solid var(--mac-border)' }}>
-          <img src={commit.author?.avatar_url || commit.committer?.avatar_url} alt="" style={{ width: 32, height: 32, borderRadius: '50%', flexShrink: 0 }} />
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontSize: 13, fontWeight: 500, color: 'var(--mac-text)', marginBottom: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-              {commit.commit?.message?.split('\n')[0] || 'No message'}
+      {commits.map((commit, i) => {
+        // 后端返回扁平结构: message, author.name, author.date, author.avatar_url, sha
+        const message = commit.message || commit.commit?.message || 'No message'
+        const authorName = commit.author?.name || commit.commit?.author?.name || 'Unknown'
+        const authorDate = commit.author?.date || commit.commit?.author?.date
+        const avatarUrl = commit.author?.avatar_url || commit.committer?.avatar_url
+        const sha = commit.sha || commit.sha_full?.slice(0, 7) || ''
+        
+        return (
+          <div key={i} style={{ display: 'flex', gap: 12, padding: '10px 0', borderBottom: '1px solid var(--mac-border)' }}>
+            <img src={avatarUrl} alt="" style={{ width: 32, height: 32, borderRadius: '50%', flexShrink: 0, background: 'var(--mac-gray)' }} />
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: 13, fontWeight: 500, color: 'var(--mac-text)', marginBottom: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {message.split('\n')[0]}
+              </div>
+              <div style={{ fontSize: 11, color: 'var(--mac-text-secondary)' }}>
+                <span style={{ color: 'var(--mac-accent)' }}>{authorName}</span>
+                {' · '}{timeAgo(authorDate)}
+              </div>
             </div>
-            <div style={{ fontSize: 11, color: 'var(--mac-text-secondary)' }}>
-              <span style={{ color: 'var(--mac-accent)' }}>{commit.commit?.author?.name || 'Unknown'}</span>
-              {' · '}{timeAgo(commit.commit?.author?.date)}
-            </div>
+            <code style={{ fontSize: 10, color: 'var(--mac-text-secondary)', background: 'var(--mac-bg)', padding: '2px 8px', borderRadius: 6, flexShrink: 0 }}>
+              {sha.slice(0, 7)}
+            </code>
           </div>
-          <code style={{ fontSize: 10, color: 'var(--mac-text-secondary)', background: 'var(--mac-bg)', padding: '2px 8px', borderRadius: 6, flexShrink: 0 }}>
-            {commit.sha?.slice(0, 7)}
-          </code>
-        </div>
-      ))}
+        )
+      })}
       {commits.length === 0 && (
         <div style={{ textAlign: 'center', padding: 20, color: 'var(--mac-text-secondary)', fontSize: 12 }}>暂无提交记录</div>
       )}

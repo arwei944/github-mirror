@@ -3111,6 +3111,12 @@ def run_deploy(project_name: str, project_config: dict):
             save_projects(projects)
             return
 
+        # 如果是浅克隆，转换为完整克隆 (HF 不接受 shallow push)
+        subprocess.run(
+            ["git", "fetch", "--unshallow"],
+            cwd=repo_dir, capture_output=True, text=True, timeout=300,
+        )
+
         print(f"[部署] {project_name} 克隆成功")
 
         # Step 2: 推送到 HuggingFace Space
