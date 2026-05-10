@@ -1,19 +1,27 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, Suspense, lazy } from 'react'
 import api from './api'
-import Repos from './pages/Repos'
-import Activity from './pages/Activity'
-import Deploy from './pages/Deploy'
-import RepoDetail from './pages/RepoDetail'
-import Issues from './pages/Issues'
-import IssueDetail from './pages/IssueDetail'
-import Pulls from './pages/Pulls'
-import PullDetail from './pages/PullDetail'
-import Actions from './pages/Actions'
-import CodeBrowse from './pages/CodeBrowse'
-import Search from './pages/Search'
-import Profile from './pages/Profile'
-import Settings from './pages/Settings'
-import Security from './pages/Security'
+import { useToast } from './components/Toast'
+import ErrorBoundary from './components/ErrorBoundary'
+import CommandPalette from './components/CommandPalette'
+import HamburgerMenu from './components/HamburgerMenu'
+import SkeletonLoader from './components/SkeletonLoader'
+import useKeyboardShortcuts from './hooks/useKeyboardShortcuts'
+
+// Code-split pages
+const Repos = lazy(() => import('./pages/Repos'))
+const Activity = lazy(() => import('./pages/Activity'))
+const Deploy = lazy(() => import('./pages/Deploy'))
+const RepoDetail = lazy(() => import('./pages/RepoDetail'))
+const Issues = lazy(() => import('./pages/Issues'))
+const IssueDetail = lazy(() => import('./pages/IssueDetail'))
+const Pulls = lazy(() => import('./pages/Pulls'))
+const PullDetail = lazy(() => import('./pages/PullDetail'))
+const Actions = lazy(() => import('./pages/Actions'))
+const CodeBrowse = lazy(() => import('./pages/CodeBrowse'))
+const Search = lazy(() => import('./pages/Search'))
+const Profile = lazy(() => import('./pages/Profile'))
+const Settings = lazy(() => import('./pages/Settings'))
+const Security = lazy(() => import('./pages/Security'))
 
 // ============ Icons ============
 const Icon = {
@@ -98,6 +106,12 @@ const Icon = {
   tag: (s = 14) => (
     <svg width={s} height={s} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path d="M20.59 13.41l-7.17 7.17a2 2 0 01-2.83 0L2 12V2h10l8.59 8.59a2 2 0 010 2.82z"/><line x1="7" y1="7" x2="7.01" y2="7"/></svg>
   ),
+  sun: (s = 16) => (
+    <svg width={s} height={s} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><circle cx="12" cy="12" r="5"/><path d="M12 1v2m0 18v2M4.22 4.22l1.42 1.42m12.72 12.72l1.42 1.42M1 12h2m18 0h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>
+  ),
+  moon: (s = 16) => (
+    <svg width={s} height={s} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z"/></svg>
+  ),
 }
 
 export { Icon }
@@ -112,18 +126,50 @@ export default function App() {
   const [projects, setProjects] = useState([])
   const [hfSpaces, setHfSpaces] = useState([])
   const [activities, setActivities] = useState([])
+  const [theme, setTheme] = useState(() => {
+    const saved = localStorage.getItem('github-mirror-theme')
+    if (saved) return saved
+    return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
+  })
+  const [sidebarOpen, setSidebarOpen] = useState(false)
+  const [commandPaletteOpen, setCommandPaletteOpen] = useState(false)
+  const toast = useToast()
+
+  // Apply theme
+  useEffect(() => {
+    document.documentElement.setAttribute('data-theme', theme)
+    localStorage.setItem('github-mirror-theme', theme)
+  }, [theme])
+
+  // Listen for system theme changes (only if user hasn't manually set)
+  useEffect(() => {
+    const saved = localStorage.getItem('github-mirror-theme')
+    if (saved) return
+    const mq = window.matchMedia('(prefers-color-scheme: dark)')
+    const handler = (e) => setTheme(e.matches ? 'dark' : 'light')
+    mq.addEventListener('change', handler)
+    return () => mq.removeEventListener('change', handler)
+  }, [])
+
+  const toggleTheme = () => {
+    setTheme(prev => prev === 'dark' ? 'light' : 'dark')
+  }
 
   const loadAll = useCallback(async () => {
-    const [g, p, h, a] = await Promise.all([
-      api.get('/api/github/repos').catch(() => []),
-      api.get('/api/projects').catch(() => []),
-      api.get('/api/hf/spaces').catch(() => []),
-      api.get('/api/github/activity').catch(() => []),
-    ])
-    setGithubRepos(g || [])
-    setProjects(p || [])
-    setHfSpaces(h || [])
-    setActivities(a || [])
+    try {
+      const [g, p, h, a] = await Promise.all([
+        api.get('/api/github/repos').catch(() => []),
+        api.get('/api/projects').catch(() => []),
+        api.get('/api/hf/spaces').catch(() => []),
+        api.get('/api/github/activity').catch(() => []),
+      ])
+      setGithubRepos(Array.isArray(g) ? g : [])
+      setProjects(Array.isArray(p) ? p : [])
+      setHfSpaces(Array.isArray(h) ? h : [])
+      setActivities(Array.isArray(a) ? a : [])
+    } catch (err) {
+      console.error('Failed to load data:', err)
+    }
   }, [])
 
   useEffect(() => { loadAll() }, [loadAll])
@@ -140,6 +186,7 @@ export default function App() {
   const handleSelectRepo = (repoName) => {
     setSelectedRepo(repoName)
     setCurrentPage('detail')
+    setSidebarOpen(false)
   }
 
   const handleBack = () => {
@@ -174,6 +221,7 @@ export default function App() {
     setSelectedIssue(null)
     setSelectedPull(null)
     setCurrentPage(page)
+    setSidebarOpen(false)
   }
 
   const navItems = [
@@ -190,35 +238,69 @@ export default function App() {
     { key: 'deploy', label: '部署管理', icon: Icon.deploy(16) },
   ]
 
+  // Keyboard shortcuts
+  useKeyboardShortcuts({
+    'ctrl+k': () => setCommandPaletteOpen(prev => !prev),
+    'escape': () => {
+      if (commandPaletteOpen) { setCommandPaletteOpen(false); return }
+      if (sidebarOpen) { setSidebarOpen(false); return }
+      if (currentPage === 'detail') { handleBack(); return }
+      if (currentPage === 'issue-detail') { handleIssueBack(); return }
+      if (currentPage === 'pull-detail') { handlePullBack(); return }
+    },
+    'r': () => loadAll(),
+    'ctrl+1': () => navigateTo('repos'),
+    'ctrl+2': () => navigateTo('issues'),
+    'ctrl+3': () => navigateTo('pulls'),
+    'ctrl+4': () => navigateTo('actions'),
+    'ctrl+5': () => navigateTo('code'),
+    'ctrl+6': () => navigateTo('search'),
+    'ctrl+7': () => navigateTo('profile'),
+    'ctrl+8': () => navigateTo('settings'),
+    'ctrl+9': () => navigateTo('security'),
+  })
+
   const renderContent = () => {
     // Detail pages (with back navigation)
     if (currentPage === 'detail' && selectedRepo) {
       return (
-        <RepoDetail
-          repoName={selectedRepo}
-          projects={projects}
-          hfSpaces={hfSpaces}
-          onBack={handleBack}
-          onRefresh={loadAll}
-        />
+        <ErrorBoundary>
+          <Suspense fallback={<SkeletonLoader page="detail" />}>
+            <RepoDetail
+              repoName={selectedRepo}
+              projects={projects}
+              hfSpaces={hfSpaces}
+              onBack={handleBack}
+              onRefresh={loadAll}
+            />
+          </Suspense>
+        </ErrorBoundary>
       )
     }
     if (currentPage === 'issue-detail' && selectedRepo && selectedIssue) {
       return (
-        <IssueDetail
-          repoName={selectedRepo}
-          issueNumber={selectedIssue}
-          onBack={handleIssueBack}
-        />
+        <ErrorBoundary>
+          <Suspense fallback={<SkeletonLoader />}>
+            <IssueDetail
+              repoName={selectedRepo}
+              issueNumber={selectedIssue}
+              onBack={handleIssueBack}
+            />
+          </Suspense>
+        </ErrorBoundary>
       )
     }
     if (currentPage === 'pull-detail' && selectedRepo && selectedPull) {
       return (
-        <PullDetail
-          repoName={selectedRepo}
-          pullNumber={selectedPull}
-          onBack={handlePullBack}
-        />
+        <ErrorBoundary>
+          <Suspense fallback={<SkeletonLoader />}>
+            <PullDetail
+              repoName={selectedRepo}
+              pullNumber={selectedPull}
+              onBack={handlePullBack}
+            />
+          </Suspense>
+        </ErrorBoundary>
       )
     }
 
@@ -226,77 +308,91 @@ export default function App() {
     switch (currentPage) {
       case 'repos':
         return (
-          <Repos
-            githubRepos={githubRepos}
-            projects={projects}
-            hfSpaces={hfSpaces}
-            onSelectRepo={handleSelectRepo}
-          />
+          <ErrorBoundary>
+            <Suspense fallback={<SkeletonLoader page="repos" />}>
+              <Repos githubRepos={githubRepos} projects={projects} hfSpaces={hfSpaces} onSelectRepo={handleSelectRepo} />
+            </Suspense>
+          </ErrorBoundary>
         )
       case 'issues':
         return (
-          <Issues
-            githubRepos={githubRepos}
-            onSelectIssue={handleSelectIssue}
-          />
+          <ErrorBoundary>
+            <Suspense fallback={<SkeletonLoader />}>
+              <Issues githubRepos={githubRepos} onSelectIssue={handleSelectIssue} />
+            </Suspense>
+          </ErrorBoundary>
         )
       case 'pulls':
         return (
-          <Pulls
-            githubRepos={githubRepos}
-            onSelectPull={handleSelectPull}
-          />
+          <ErrorBoundary>
+            <Suspense fallback={<SkeletonLoader />}>
+              <Pulls githubRepos={githubRepos} onSelectPull={handleSelectPull} />
+            </Suspense>
+          </ErrorBoundary>
         )
       case 'actions':
         return (
-          <Actions
-            githubRepos={githubRepos}
-          />
+          <ErrorBoundary>
+            <Suspense fallback={<SkeletonLoader />}>
+              <Actions githubRepos={githubRepos} />
+            </Suspense>
+          </ErrorBoundary>
         )
       case 'code':
         return (
-          <CodeBrowse
-            githubRepos={githubRepos}
-          />
+          <ErrorBoundary>
+            <Suspense fallback={<SkeletonLoader />}>
+              <CodeBrowse githubRepos={githubRepos} />
+            </Suspense>
+          </ErrorBoundary>
         )
       case 'search':
         return (
-          <Search
-            githubRepos={githubRepos}
-            onSelectRepo={handleSelectRepo}
-          />
+          <ErrorBoundary>
+            <Suspense fallback={<SkeletonLoader />}>
+              <Search githubRepos={githubRepos} onSelectRepo={handleSelectRepo} />
+            </Suspense>
+          </ErrorBoundary>
         )
       case 'profile':
         return (
-          <Profile />
+          <ErrorBoundary>
+            <Suspense fallback={<SkeletonLoader />}>
+              <Profile />
+            </Suspense>
+          </ErrorBoundary>
         )
       case 'settings':
         return (
-          <Settings
-            githubRepos={githubRepos}
-          />
+          <ErrorBoundary>
+            <Suspense fallback={<SkeletonLoader />}>
+              <Settings githubRepos={githubRepos} />
+            </Suspense>
+          </ErrorBoundary>
         )
       case 'activity':
         return (
-          <Activity
-            activities={activities}
-            onSelectRepo={handleSelectRepo}
-          />
+          <ErrorBoundary>
+            <Suspense fallback={<SkeletonLoader />}>
+              <Activity activities={activities} onSelectRepo={handleSelectRepo} />
+            </Suspense>
+          </ErrorBoundary>
         )
       case 'security':
         return (
-          <Security
-            githubRepos={githubRepos}
-          />
+          <ErrorBoundary>
+            <Suspense fallback={<SkeletonLoader />}>
+              <Security githubRepos={githubRepos} />
+            </Suspense>
+          </ErrorBoundary>
         )
       case 'deploy':
         return (
-          <Deploy
-            githubRepos={githubRepos}
-            projects={projects}
-            hfSpaces={hfSpaces}
-            onRefresh={loadAll}
-          />
+          <ErrorBoundary>
+            <Suspense fallback={<SkeletonLoader />}>
+              <Deploy githubRepos={githubRepos} projects={projects} hfSpaces={hfSpaces} onRefresh={loadAll} />
+            </Suspense>
+          </ErrorBoundary>
         )
       default:
         return null
@@ -305,15 +401,35 @@ export default function App() {
 
   return (
     <div className="app-layout">
+      {/* Mobile hamburger button */}
+      <div className="mobile-header">
+        <HamburgerMenu isOpen={sidebarOpen} onClick={() => setSidebarOpen(prev => !prev)} />
+        <span style={{ fontSize: 15, fontWeight: 600, letterSpacing: '-0.02em' }}>GitHub Mirror</span>
+        <span style={{ fontSize: 9, padding: '1px 6px', borderRadius: 8, background: 'var(--mac-accent)', color: 'white', fontWeight: 500 }}>v5.0</span>
+      </div>
+
+      {/* Mobile sidebar overlay */}
+      {sidebarOpen && (
+        <div className="sidebar-overlay" onClick={() => setSidebarOpen(false)} />
+      )}
+
       {/* Sidebar */}
-      <aside className="sidebar">
+      <aside className={`sidebar ${sidebarOpen ? 'sidebar-open' : ''}`}>
         {/* Header */}
         <div className="sidebar-header">
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <span style={{ color: 'var(--mac-text)' }}>{Icon.github(18)}</span>
-            <span style={{ fontSize: 15, fontWeight: 600, letterSpacing: '-0.02em' }}>GitHub Mirror</span>
-            <span style={{ fontSize: 9, padding: '1px 6px', borderRadius: 8, background: 'var(--mac-accent)', color: 'white', fontWeight: 500 }}>v4.4</span>
+            <span className="sidebar-title" style={{ fontSize: 15, fontWeight: 600, letterSpacing: '-0.02em' }}>GitHub Mirror</span>
+            <span className="sidebar-version" style={{ fontSize: 9, padding: '1px 6px', borderRadius: 8, background: 'var(--mac-accent)', color: 'white', fontWeight: 500 }}>v5.0</span>
           </div>
+          {/* Theme toggle */}
+          <button
+            className="theme-toggle"
+            onClick={toggleTheme}
+            title={theme === 'dark' ? '切换到亮色模式' : '切换到暗色模式'}
+          >
+            {theme === 'dark' ? Icon.sun(16) : Icon.moon(16)}
+          </button>
         </div>
 
         {/* Navigation */}
@@ -321,11 +437,12 @@ export default function App() {
           {navItems.map(item => (
             <div
               key={item.key}
-              className={`nav-item ${currentPage === item.key || (item.key === 'issues' && currentPage === 'issue-detail') || (item.key === 'pulls' && currentPage === 'pull-detail') || (item.key === 'profile' && currentPage === 'profile') || (item.key === 'security' && currentPage === 'security') ? 'active' : ''}`}
+              className={`nav-item ${currentPage === item.key || (item.key === 'issues' && currentPage === 'issue-detail') || (item.key === 'pulls' && currentPage === 'pull-detail') ? 'active' : ''}`}
               onClick={() => navigateTo(item.key)}
+              title={item.label}
             >
               {item.icon}
-              {item.label}
+              <span className="nav-label">{item.label}</span>
             </div>
           ))}
         </nav>
@@ -342,6 +459,14 @@ export default function App() {
       <main className="main-content">
         {renderContent()}
       </main>
+
+      {/* Command Palette */}
+      <CommandPalette
+        navItems={navItems}
+        onNavigate={navigateTo}
+        isOpen={commandPaletteOpen}
+        onClose={() => setCommandPaletteOpen(false)}
+      />
     </div>
   )
 }

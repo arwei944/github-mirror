@@ -20,7 +20,7 @@ from fastapi import FastAPI, Query, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 
-__version__ = "4.4.0"
+__version__ = "5.0.0"
 
 app = FastAPI(
     version=__version__,
@@ -116,6 +116,93 @@ def github_api_delete(path: str, **kwargs) -> tuple:
 def github_api_patch(path: str, data: Optional[dict] = None, **kwargs) -> tuple:
     """PATCH 请求"""
     return github_request(path, method="PATCH", data=data, **kwargs)
+
+
+# ──────────────────────────────────────────────
+# 缓存层 (v5.0.0)
+# ──────────────────────────────────────────────
+class TTLCache:
+    """带 TTL 的内存缓存"""
+    def __init__(self, default_ttl=60):
+        self._cache = {}
+        self._default_ttl = default_ttl
+
+    def get(self, key):
+        entry = self._cache.get(key)
+        if entry is None:
+            return None
+        if time.time() - entry['time'] > entry['ttl']:
+            del self._cache[key]
+            return None
+        return entry['value']
+
+    def set(self, key, value, ttl=None):
+        self._cache[key] = {
+            'value': value,
+            'ttl': ttl or self._default_ttl,
+            'time': time.time()
+        }
+
+    def invalidate(self, key):
+        self._cache.pop(key, None)
+
+    def clear(self):
+        self._cache.clear()
+
+# 缓存实例
+api_cache = TTLCache(default_ttl=60)
+
+# 缓存配置: 端点路径前缀 -> TTL (秒)
+CACHE_CONFIG = {
+    '/api/github/user': 300,       # 5 分钟
+    '/api/github/repos': 120,      # 2 分钟
+    '/api/github/rate_limit': 60,  # 1 分钟
+}
+
+
+@app.middleware("http")
+async def cache_middleware(request: Request, call_next):
+    path = request.url.path
+    method = request.method
+    
+    # 写操作清除相关缓存
+    if method in ("POST", "PUT", "PATCH", "DELETE"):
+        for prefix in list(CACHE_CONFIG.keys()):
+            if path.startswith(prefix) or '/repos' in path:
+                api_cache.invalidate(prefix)
+        return await call_next(request)
+    
+    # 读操作检查缓存
+    if method == "GET":
+        for prefix, ttl in CACHE_CONFIG.items():
+            if path.startswith(prefix):
+                cache_key = f"{method}:{path}:{request.url.query}"
+                cached = api_cache.get(cache_key)
+                if cached is not None:
+                    from starlette.responses import Response
+                    import json as _json
+                    return Response(
+                        content=_json.dumps(cached),
+                        media_type="application/json",
+                        status_code=200
+                    )
+                # Cache miss - proceed and cache the response
+                response = await call_next(request)
+                if response.status_code == 200:
+                    try:
+                        body = await response.body()
+                        try:
+                            data = _json.loads(body)
+                            api_cache.set(cache_key, data, ttl)
+                        except (_json.JSONDecodeError, ValueError):
+                            pass
+                        from starlette.responses import Response as _R
+                        return _R(content=body, media_type=response.media_type, status_code=response.status_code, headers=dict(response.headers))
+                    except Exception:
+                        return response
+                return response
+    
+    return await call_next(request)
 
 
 # ──────────────────────────────────────────────
@@ -3284,22 +3371,55 @@ async def serve_index():
 
 
 # ──────────────────────────────────────────────
-# 全局异常处理
+# 全局异常处理 (v5.0.0 增强)
 # ──────────────────────────────────────────────
+ERROR_CODES = {
+    1001: "GITHUB_TOKEN 未配置",
+    1002: "GitHub API 请求失败",
+    1003: "GitHub API 速率限制",
+    1004: "请求参数无效",
+    1005: "资源不存在",
+}
+
 @app.exception_handler(HTTPException)
 async def http_exception_handler(request: Request, exc: HTTPException):
-    return JSONResponse(
-        status_code=exc.status_code,
-        content={"detail": exc.detail, "status_code": exc.status_code},
-    )
-
+    error_code = 1004 if exc.status_code == 400 else (1005 if exc.status_code == 404 else None)
+    content = {"detail": exc.detail, "status_code": exc.status_code}
+    if error_code:
+        content["error"] = ERROR_CODES[error_code]
+        content["code"] = error_code
+    return JSONResponse(status_code=exc.status_code, content=content)
 
 @app.exception_handler(Exception)
 async def general_exception_handler(request: Request, exc: Exception):
     return JSONResponse(
         status_code=500,
-        content={"detail": f"服务器内部错误: {str(exc)}", "status_code": 500},
+        content={
+            "error": "服务器内部错误",
+            "code": 1002,
+            "detail": f"{str(exc)}",
+            "status_code": 500,
+        },
     )
+
+
+# ──────────────────────────────────────────────
+# 缓存管理 (v5.0.0)
+# ──────────────────────────────────────────────
+@app.post("/api/cache/clear")
+async def clear_cache():
+    """手动清除所有缓存"""
+    api_cache.clear()
+    return {"status": "ok", "message": "缓存已清除"}
+
+@app.get("/api/cache/stats")
+async def cache_stats():
+    """查看缓存统计"""
+    return {
+        "status": "ok",
+        "entries": len(api_cache._cache),
+        "config": CACHE_CONFIG,
+    }
 
 
 # ──────────────────────────────────────────────
