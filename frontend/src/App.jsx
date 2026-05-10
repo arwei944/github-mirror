@@ -8,6 +8,7 @@ import SkeletonLoader from './components/SkeletonLoader'
 import useKeyboardShortcuts from './hooks/useKeyboardShortcuts'
 
 // Code-split pages
+const Dashboard = lazy(() => import('./pages/Dashboard'))
 const Repos = lazy(() => import('./pages/Repos'))
 const Activity = lazy(() => import('./pages/Activity'))
 const Deploy = lazy(() => import('./pages/Deploy'))
@@ -24,6 +25,7 @@ const Settings = lazy(() => import('./pages/Settings'))
 const Security = lazy(() => import('./pages/Security'))
 const Discussions = lazy(() => import('./pages/Discussions'))
 const Analytics = lazy(() => import('./pages/Analytics'))
+const Starred = lazy(() => import('./pages/Starred'))
 
 // ============ Icons ============
 const Icon = {
@@ -126,7 +128,7 @@ export { Icon }
 
 // ============ Main App ============
 export default function App() {
-  const [currentPage, setCurrentPage] = useState('repos')
+  const [currentPage, setCurrentPage] = useState('dashboard')
   const [selectedRepo, setSelectedRepo] = useState(null)
   const [selectedIssue, setSelectedIssue] = useState(null)
   const [selectedPull, setSelectedPull] = useState(null)
@@ -242,6 +244,7 @@ export default function App() {
 
   const navItems = [
     { key: 'repos', label: '仓库', icon: Icon.github(16) },
+    { key: 'starred', label: '星标项目', icon: Icon.star(16) },
     { key: 'issues', label: 'Issues', icon: Icon.issue(16) },
     { key: 'pulls', label: 'Pull Requests', icon: Icon.pr(16) },
     { key: 'actions', label: 'Actions', icon: Icon.zap(16) },
@@ -349,6 +352,22 @@ export default function App() {
 
     // Main pages
     switch (currentPage) {
+      case 'dashboard':
+        return (
+          <ErrorBoundary>
+            <Suspense fallback={<SkeletonLoader />}>
+              <Dashboard githubRepos={githubRepos} onSelectRepo={handleSelectRepo} onNavigate={navigateTo} />
+            </Suspense>
+          </ErrorBoundary>
+        )
+      case 'starred':
+        return (
+          <ErrorBoundary>
+            <Suspense fallback={<SkeletonLoader />}>
+              <Starred onSelectRepo={handleSelectRepo} />
+            </Suspense>
+          </ErrorBoundary>
+        )
       case 'repos':
         return (
           <ErrorBoundary>
@@ -464,7 +483,7 @@ export default function App() {
       <div className="mobile-header">
         <HamburgerMenu isOpen={sidebarOpen} onClick={() => setSidebarOpen(prev => !prev)} />
         <span style={{ fontSize: 15, fontWeight: 600, letterSpacing: '-0.02em' }}>GitHub Mirror</span>
-        <span style={{ fontSize: 9, padding: '1px 6px', borderRadius: 8, background: 'var(--mac-accent)', color: 'white', fontWeight: 500 }}>v5.3</span>
+        <span style={{ fontSize: 9, padding: '1px 6px', borderRadius: 8, background: 'var(--mac-accent)', color: 'white', fontWeight: 500 }}>v5.4</span>
       </div>
 
       {/* Mobile sidebar overlay */}
@@ -479,7 +498,7 @@ export default function App() {
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <span style={{ color: 'var(--mac-text)' }}>{Icon.github(18)}</span>
             <span className="sidebar-title" style={{ fontSize: 15, fontWeight: 600, letterSpacing: '-0.02em' }}>GitHub Mirror</span>
-            <span className="sidebar-version" style={{ fontSize: 9, padding: '1px 6px', borderRadius: 8, background: 'var(--mac-accent)', color: 'white', fontWeight: 500 }}>v5.3</span>
+            <span className="sidebar-version" style={{ fontSize: 9, padding: '1px 6px', borderRadius: 8, background: 'var(--mac-accent)', color: 'white', fontWeight: 500 }}>v5.4</span>
           </div>
           {/* Theme toggle */}
           <button

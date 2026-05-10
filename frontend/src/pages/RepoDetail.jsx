@@ -1,6 +1,9 @@
 import { useState, useEffect } from 'react'
+import React from 'react'
 import { Icon } from '../App'
 import api from '../api'
+import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 
 const LANG_COLORS = {
   Python: '#3572A5', JavaScript: '#f1e05a', TypeScript: '#3178c6', HTML: '#e34c26', CSS: '#563d7c',
@@ -45,24 +48,252 @@ function LanguageBar({ languages }) {
   )
 }
 
-export default function RepoDetail({ repoName, projects, hfSpaces, onBack, onRefresh }) {
+// File type icon helper
+function getFileIcon(name) {
+  if (!name) return '📄'
+  const ext = name.split('.').pop().toLowerCase()
+  const icons = {
+    js: '🟨', jsx: '🟨', ts: '🔷', tsx: '🔷', py: '🐍', rb: '💎', go: '🔵',
+    rs: '🦀', java: '☕', css: '🎨', scss: '🎨', html: '🌐', md: '📝',
+    json: '📋', yaml: '📋', yml: '📋', toml: '📋', lock: '🔒',
+    png: '🖼️', jpg: '🖼️', gif: '🖼️', svg: '🖼️',
+    dockerfile: '🐳', docker: '🐳', gitignore: '🙈',
+    sh: '🖥️', bash: '🖥️', zsh: '🖥️',
+    txt: '📄', csv: '📊', sql: '🗃️',
+  }
+  return icons[ext] || icons[name.toLowerCase()] || '📄'
+}
+
+// README renderer component
+function ReadmeViewer({ content, repoName }) {
+  if (!content) {
+    return (
+      <div style={{ textAlign: 'center', padding: 40, color: 'var(--mac-text-secondary)' }}>
+        <div style={{ fontSize: 24, marginBottom: 8 }}>📖</div>
+        <div style={{ fontSize: 12 }}>此仓库没有 README</div>
+      </div>
+    )
+  }
+  const isDark = document.documentElement.getAttribute('data-theme') === 'dark'
+  return (
+    <div style={{ padding: '0 4px' }}>
+      <ReactMarkdown
+        remarkPlugins={[remarkGfm]}
+        components={{
+          code({ node, inline, className, children, ...props }) {
+            if (!inline) {
+              const match = /language-(\w+)/.exec(className || '')
+              const lang = match ? match[1] : ''
+              return (
+                <div style={{ position: 'relative', margin: '12px 0' }}>
+                  {lang && <div style={{ position: 'absolute', top: 0, right: 0, padding: '2px 8px', fontSize: 10, color: 'var(--mac-text-secondary)', background: 'var(--mac-surface)', borderRadius: '0 8px 0 8px' }}>{lang}</div>}
+                  <pre style={{
+                    background: 'var(--mac-bg)', border: '1px solid var(--mac-border)', borderRadius: 8,
+                    padding: '12px 14px', overflow: 'auto', fontSize: 12, lineHeight: 1.6,
+                    fontFamily: 'SF Mono, Monaco, Menlo, Consolas, monospace',
+                  }}><code>{String(children).replace(/\n$/, '')}</code></pre>
+                </div>
+              )
+            }
+            return <code style={{ background: 'var(--mac-bg)', padding: '2px 6px', borderRadius: 4, fontSize: '0.9em', color: 'var(--mac-accent)' }} {...props}>{children}</code>
+          },
+          a({ href, children }) {
+            return <a href={href} target="_blank" rel="noopener" style={{ color: 'var(--mac-accent)' }}>{children}</a>
+          },
+          table({ children }) {
+            return <div style={{ overflow: 'auto' }}><table style={{ borderCollapse: 'collapse', width: '100%', fontSize: 12 }}>{children}</table></div>
+          },
+          th({ children }) {
+            return <th style={{ padding: '6px 12px', border: '1px solid var(--mac-border)', background: 'var(--mac-surface)', fontWeight: 600, textAlign: 'left' }}>{children}</th>
+          },
+          td({ children }) {
+            return <td style={{ padding: '6px 12px', border: '1px solid var(--mac-border)' }}>{children}</td>
+          },
+          img({ src, alt }) {
+            return <img src={src} alt={alt || ''} style={{ maxWidth: '100%', borderRadius: 8, margin: '8px 0' }} />
+          },
+        }}
+      >
+        {content}
+      </ReactMarkdown>
+    </div>
+  )
+}
+
+// File browser component
+function FileBrowser({ repoName, branch }) {
+  const [contents, setContents] = useState([])
+  const [currentPath, setCurrentPath] = useState('')
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    setLoading(true)
+    api.get(`/api/github/repos/${repoName}/contents/${currentPath}`).then(data => {
+      setContents(Array.isArray(data) ? data : [])
+    }).catch(() => setContents([])).finally(() => setLoading(false))
+  }, [repoName, currentPath, branch])
+
+  if (loading) return <div style={{ padding: 20, textAlign: 'center', color: 'var(--mac-text-secondary)', fontSize: 12 }}>加载中...</div>
+
+  const folders = contents.filter(c => c.type === 'dir')
+  const files = contents.filter(c => c.type === 'file')
+
+  return (
+    <div>
+      {/* Breadcrumb */}
+      {currentPath && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginBottom: 12, fontSize: 12 }}>
+          <span style={{ cursor: 'pointer', color: 'var(--mac-accent)' }} onClick={() => setCurrentPath('')}>根目录</span>
+          {currentPath.split('/').filter(Boolean).map((part, i, arr) => (
+            <React.Fragment key={i}>
+              <span style={{ color: 'var(--mac-text-secondary)' }}>/</span>
+              <span style={{ cursor: 'pointer', color: i === arr.length - 1 ? 'var(--mac-text)' : 'var(--mac-accent)' }}
+                onClick={() => setCurrentPath(arr.slice(0, i + 1).join('/'))}>{part}</span>
+            </React.Fragment>
+          ))}
+        </div>
+      )}
+      {/* File list */}
+      <div style={{ border: '1px solid var(--mac-border)', borderRadius: 8, overflow: 'hidden' }}>
+        {[...folders, ...files].map((item, i) => (
+          <div key={i} onClick={() => item.type === 'dir' && setCurrentPath(item.path)}
+            style={{
+              display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px',
+              borderBottom: '1px solid var(--mac-border)', cursor: item.type === 'dir' ? 'pointer' : 'default',
+              fontSize: 12, color: 'var(--mac-text)',
+            }}
+            onMouseEnter={e => e.currentTarget.style.background = 'var(--mac-surface-hover)'}
+            onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+          >
+            <span>{getFileIcon(item.name)}</span>
+            <span style={{ flex: 1, fontWeight: item.type === 'dir' ? 500 : 400 }}>{item.name}</span>
+            {item.size && <span style={{ color: 'var(--mac-text-secondary)', fontSize: 10 }}>{(item.size / 1024).toFixed(1)} KB</span>}
+          </div>
+        ))}
+        {contents.length === 0 && (
+          <div style={{ textAlign: 'center', padding: 20, color: 'var(--mac-text-secondary)', fontSize: 12 }}>空目录</div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+// Commit timeline component
+function CommitTimeline({ repoName, branch }) {
+  const [commits, setCommits] = useState([])
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    setLoading(true)
+    const params = branch && branch !== 'default' ? `?branch=${branch}` : ''
+    api.get(`/api/github/repos/${repoName}/commits${params}`).then(data => {
+      setCommits(Array.isArray(data) ? data : [])
+    }).catch(() => setCommits([])).finally(() => setLoading(false))
+  }, [repoName, branch])
+
+  if (loading) return <div style={{ padding: 20, textAlign: 'center', color: 'var(--mac-text-secondary)', fontSize: 12 }}>加载中...</div>
+
+  return (
+    <div>
+      {commits.map((commit, i) => (
+        <div key={i} style={{ display: 'flex', gap: 12, padding: '10px 0', borderBottom: '1px solid var(--mac-border)' }}>
+          <img src={commit.author?.avatar_url || commit.committer?.avatar_url} alt="" style={{ width: 32, height: 32, borderRadius: '50%', flexShrink: 0 }} />
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 13, fontWeight: 500, color: 'var(--mac-text)', marginBottom: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {commit.commit?.message?.split('\n')[0] || 'No message'}
+            </div>
+            <div style={{ fontSize: 11, color: 'var(--mac-text-secondary)' }}>
+              <span style={{ color: 'var(--mac-accent)' }}>{commit.commit?.author?.name || 'Unknown'}</span>
+              {' · '}{timeAgo(commit.commit?.author?.date)}
+            </div>
+          </div>
+          <code style={{ fontSize: 10, color: 'var(--mac-text-secondary)', background: 'var(--mac-bg)', padding: '2px 8px', borderRadius: 6, flexShrink: 0 }}>
+            {commit.sha?.slice(0, 7)}
+          </code>
+        </div>
+      ))}
+      {commits.length === 0 && (
+        <div style={{ textAlign: 'center', padding: 20, color: 'var(--mac-text-secondary)', fontSize: 12 }}>暂无提交记录</div>
+      )}
+    </div>
+  )
+}
+
+// Releases list component
+function ReleasesList({ repoName }) {
+  const [releases, setReleases] = useState([])
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    setLoading(true)
+    api.get(`/api/github/repos/${repoName}/releases`).then(data => {
+      setReleases(Array.isArray(data) ? data : [])
+    }).catch(() => setReleases([])).finally(() => setLoading(false))
+  }, [repoName])
+
+  if (loading) return <div style={{ padding: 20, textAlign: 'center', color: 'var(--mac-text-secondary)', fontSize: 12 }}>加载中...</div>
+
+  return (
+    <div>
+      {releases.map((rel, i) => (
+        <div key={i} style={{ padding: '14px 0', borderBottom: '1px solid var(--mac-border)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+            <span style={{ fontSize: 16 }}>📦</span>
+            <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--mac-accent)' }}>{rel.tag_name}</span>
+            {rel.name && <span style={{ fontSize: 12, color: 'var(--mac-text)' }}>{rel.name}</span>}
+          </div>
+          <p style={{ fontSize: 12, color: 'var(--mac-text-secondary)', margin: '0 0 8px', lineHeight: 1.5 }}>
+            {rel.body?.slice(0, 200) || '暂无描述'}{rel.body?.length > 200 ? '...' : ''}
+          </p>
+          <div style={{ display: 'flex', gap: 12, fontSize: 11, color: 'var(--mac-text-secondary)' }}>
+            <span>{timeAgo(rel.published_at)}</span>
+            <span>👤 {rel.author?.login || 'Unknown'}</span>
+          </div>
+        </div>
+      ))}
+      {releases.length === 0 && (
+        <div style={{ textAlign: 'center', padding: 20, color: 'var(--mac-text-secondary)', fontSize: 12 }}>
+          <div style={{ fontSize: 24, marginBottom: 8 }}>📦</div>
+          暂无发布版本
+        </div>
+      )}
+    </div>
+  )
+}
+
+export default function RepoDetail({ repoName, projects, hfSpaces, onBack, onRefresh, onNavigate }) {
   const [detail, setDetail] = useState(null)
-  const [tab, setTab] = useState('readme')
+  const [activeTab, setActiveTab] = useState('overview')
   const [loading, setLoading] = useState({})
   const [license, setLicense] = useState(null)
   const [community, setCommunity] = useState(null)
+  const [readme, setReadme] = useState('')
+  const [branches, setBranches] = useState([])
+  const [selectedBranch, setSelectedBranch] = useState('')
 
   useEffect(() => {
     setDetail(null)
-    setTab('readme')
+    setActiveTab('overview')
     setLicense(null)
     setCommunity(null)
+    setReadme('')
+    setBranches([])
+    setSelectedBranch('')
     api.get(`/api/github/repos/${repoName}/detail`).then(data => {
       setDetail(data)
       // Fetch license and community after repo data is loaded
       api.get(`/api/github/repos/${repoName}/license`).then(lic => setLicense(lic)).catch(() => {})
       api.get(`/api/github/repos/${repoName}/community/profile`).then(com => setCommunity(com)).catch(() => {})
     })
+    // Fetch README and branches
+    api.get(`/api/github/repos/${repoName}/readme`).then(data => {
+      setReadme(data?.content || '')
+    }).catch(() => setReadme(''))
+    api.get(`/api/github/repos/${repoName}/branches`).then(data => {
+      const list = Array.isArray(data) ? data : []
+      setBranches(list)
+      if (list.length > 0) setSelectedBranch(list[0].name)
+    }).catch(() => setBranches([]))
   }, [repoName])
 
   if (!detail) return (
@@ -131,10 +362,13 @@ export default function RepoDetail({ repoName, projects, hfSpaces, onBack, onRef
   }
 
   const tabs = [
-    { key: 'readme', label: 'README' },
-    { key: 'commits', label: `提交 (${detail.commits?.length || 0})` },
-    { key: 'branches', label: `分支 (${detail.branches?.length || 0})` },
-    { key: 'contributors', label: '贡献者' },
+    { key: 'overview', label: '概览' },
+    { key: 'files', label: '文件' },
+    { key: 'commits', label: '提交' },
+    { key: 'issues', label: 'Issues' },
+    { key: 'pulls', label: 'PRs' },
+    { key: 'stats', label: '统计' },
+    { key: 'releases', label: 'Releases' },
   ]
 
   return (
@@ -255,72 +489,51 @@ export default function RepoDetail({ repoName, projects, hfSpaces, onBack, onRef
         {/* Tabs */}
         <div style={{ display: 'flex', gap: 2, marginBottom: 0 }}>
           {tabs.map(t => (
-            <button key={t.key} onClick={() => setTab(t.key)}
-              className={`detail-tab ${tab === t.key ? 'active' : ''}`}>
+            <button key={t.key} onClick={() => setActiveTab(t.key)}
+              className={`detail-tab ${activeTab === t.key ? 'active' : ''}`}>
               {t.label}
             </button>
           ))}
         </div>
 
+        {/* Branch selector (visible on files/commits tabs) */}
+        {(activeTab === 'files' || activeTab === 'commits') && branches.length > 0 && (
+          <select value={selectedBranch} onChange={e => setSelectedBranch(e.target.value)} style={{
+            background: 'var(--mac-surface)', border: '1px solid var(--mac-border)',
+            borderRadius: 8, padding: '4px 8px', color: 'var(--mac-text)', fontSize: 11, outline: 'none',
+            marginBottom: 8,
+          }}>
+            {branches.map(b => <option key={b.name} value={b.name}>{b.name}</option>)}
+          </select>
+        )}
+
         {/* Tab Content */}
         <div className="glass detail-tab-content">
-          {tab === 'readme' && (
-            detail.readme_html ? (
-              <div className="readme-body" dangerouslySetInnerHTML={{ __html: detail.readme_html }} />
-            ) : (
-              <div style={{ textAlign: 'center', padding: 48, color: 'var(--mac-text-secondary)' }}>暂无 README 文件</div>
-            )
-          )}
-          {tab === 'commits' && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-              {!detail.commits || detail.commits.length === 0 ? (
-                <div style={{ textAlign: 'center', padding: 48, color: 'var(--mac-text-secondary)' }}>暂无提交记录</div>
-              ) : detail.commits.map(c => (
-                <div key={c.sha} className="detail-row">
-                  {c.avatar && <img src={c.avatar} alt="" style={{ width: 22, height: 22, borderRadius: '50%', flexShrink: 0 }} />}
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontWeight: 500, fontSize: 12, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.message}</div>
-                    <div style={{ color: 'var(--mac-text-secondary)', fontSize: 10, marginTop: 1 }}>{c.author} · {timeAgo(c.date)}</div>
-                  </div>
-                  <code style={{ fontFamily: 'monospace', fontSize: 10, color: 'var(--mac-accent)', background: 'var(--mac-gray)', padding: '2px 6px', borderRadius: 3, flexShrink: 0 }}>{c.sha}</code>
-                </div>
-              ))}
+          {activeTab === 'overview' && <ReadmeViewer content={readme} repoName={repoName} />}
+          {activeTab === 'files' && <FileBrowser repoName={repoName} branch={selectedBranch} />}
+          {activeTab === 'commits' && <CommitTimeline repoName={repoName} branch={selectedBranch} />}
+          {activeTab === 'issues' && (
+            <div style={{ textAlign: 'center', padding: 30 }}>
+              <button onClick={() => onNavigate?.('issues')} style={{ background: 'var(--mac-accent)', color: 'white', border: 'none', borderRadius: 8, padding: '8px 20px', cursor: 'pointer', fontSize: 13 }}>
+                前往 Issues 页面 →
+              </button>
             </div>
           )}
-          {tab === 'branches' && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-              {!detail.branches || detail.branches.length === 0 ? (
-                <div style={{ textAlign: 'center', padding: 48, color: 'var(--mac-text-secondary)' }}>暂无分支信息</div>
-              ) : detail.branches.map(b => (
-                <div key={b.name} className="detail-row">
-                  <span style={{ color: 'var(--mac-text-secondary)' }}>{Icon.gitBranch(13)}</span>
-                  <code style={{ fontFamily: 'monospace', fontWeight: b.name === detail.default_branch ? 600 : 400, fontSize: 12 }}>{b.name}</code>
-                  {b.name === detail.default_branch && <span style={{ fontSize: 9, padding: '1px 6px', borderRadius: 4, background: 'var(--mac-accent)', color: 'white' }}>默认</span>}
-                  {b.protected && <span style={{ fontSize: 9, padding: '1px 6px', borderRadius: 4, background: 'rgba(255,149,0,0.15)', color: 'var(--mac-orange)' }}>受保护</span>}
-                </div>
-              ))}
+          {activeTab === 'pulls' && (
+            <div style={{ textAlign: 'center', padding: 30 }}>
+              <button onClick={() => onNavigate?.('pulls')} style={{ background: 'var(--mac-accent)', color: 'white', border: 'none', borderRadius: 8, padding: '8px 20px', cursor: 'pointer', fontSize: 13 }}>
+                前往 Pull Requests 页面 →
+              </button>
             </div>
           )}
-          {tab === 'contributors' && (
-            <div>
-              {!detail.contributors || detail.contributors.length === 0 ? (
-                <div style={{ textAlign: 'center', padding: 48, color: 'var(--mac-text-secondary)' }}>暂无贡献者信息</div>
-              ) : (
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16 }}>
-                  {detail.contributors.map(c => (
-                    <a key={c.login} href={c.html_url} target="_blank" rel="noopener noreferrer"
-                      style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 5, textDecoration: 'none', color: 'var(--mac-text)', padding: 10, borderRadius: 10, transition: 'background 0.15s' }}
-                      onMouseEnter={e => e.currentTarget.style.background = 'var(--mac-surface-hover)'}
-                      onMouseLeave={e => e.currentTarget.style.background = 'none'}>
-                      <img src={c.avatar} alt={c.login} style={{ width: 44, height: 44, borderRadius: '50%' }} />
-                      <span style={{ fontSize: 12, fontWeight: 500 }}>{c.login}</span>
-                      <span style={{ fontSize: 10, color: 'var(--mac-text-secondary)' }}>{c.contributions} 次提交</span>
-                    </a>
-                  ))}
-                </div>
-              )}
+          {activeTab === 'stats' && (
+            <div style={{ textAlign: 'center', padding: 30, color: 'var(--mac-text-secondary)', fontSize: 12 }}>
+              <button onClick={() => onNavigate?.('analytics')} style={{ background: 'var(--mac-accent)', color: 'white', border: 'none', borderRadius: 8, padding: '8px 20px', cursor: 'pointer', fontSize: 13 }}>
+                前往数据分析页面 →
+              </button>
             </div>
           )}
+          {activeTab === 'releases' && <ReleasesList repoName={repoName} />}
         </div>
       </div>
     </div>

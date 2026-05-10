@@ -20,7 +20,7 @@ from fastapi import FastAPI, Query, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 
-__version__ = "5.3.0"
+__version__ = "5.4.0"
 
 app = FastAPI(
     version=__version__,
@@ -3860,6 +3860,71 @@ async def stats_punch_card(repo_name: str):
     data = await _fetch_stats_with_retry(f"/repos/{repo_name}/stats/punch_card")
     stats_cache.set(cache_key, data, ttl=600)
     return data
+
+
+# ──────────────────────────────────────────────
+# Dashboard & Repo Detail APIs (v5.4.0)
+# ──────────────────────────────────────────────
+
+@app.get("/api/github/user/starred")
+async def get_starred_repos(request: Request):
+    """获取星标仓库列表 (v5.4.0)"""
+    params = dict(request.query_params)
+    params.setdefault("per_page", "30")
+    params.setdefault("sort", "updated")
+    return github_api_get("/user/starred", params=params)
+
+@app.get("/api/github/repos/{repo_name}/readme")
+async def get_readme(repo_name: str):
+    """获取仓库 README 原始内容 (v5.4.0)"""
+    data, status = github_api_get(f"/repos/{repo_name}/readme")
+    if status != 200 or not data:
+        return {"content": None, "name": None, "path": None}
+    import base64
+    content = data.get("content", "")
+    if data.get("encoding") == "base64" and content:
+        try:
+            content = base64.b64decode(content).decode("utf-8")
+        except Exception:
+            pass
+    return {
+        "content": content,
+        "name": data.get("name", "README.md"),
+        "path": data.get("path", ""),
+        "sha": data.get("sha", ""),
+    }
+
+@app.get("/api/github/repos/{repo_name}/branches")
+async def get_branches(repo_name: str, request: Request):
+    """获取仓库分支列表 (v5.4.0)"""
+    params = dict(request.query_params)
+    params.setdefault("per_page", "30")
+    return github_api_get(f"/repos/{repo_name}/branches", params=params)
+
+@app.get("/api/github/repos/{repo_name}/releases")
+async def get_releases(repo_name: str, request: Request):
+    """获取仓库发布版本列表 (v5.4.0)"""
+    params = dict(request.query_params)
+    params.setdefault("per_page", "10")
+    return github_api_get(f"/repos/{repo_name}/releases", params=params)
+
+@app.get("/api/github/repos/{repo_name}/contents/{path:path}")
+async def get_contents(repo_name: str, path: str = ""):
+    """获取仓库文件/目录内容 (v5.4.0)"""
+    data, status = github_api_get(f"/repos/{repo_name}/contents/{path}")
+    if status == 200:
+        return data if data else []
+    return []
+
+@app.get("/api/github/repos/{repo_name}/commits")
+async def get_commits(repo_name: str, request: Request):
+    """获取仓库提交历史 (v5.4.0)"""
+    params = dict(request.query_params)
+    params.setdefault("per_page", "20")
+    branch = params.pop("branch", None)
+    if branch:
+        params["sha"] = branch
+    return github_api_get(f"/repos/{repo_name}/commits", params=params)
 
 
 # ──────────────────────────────────────────────
