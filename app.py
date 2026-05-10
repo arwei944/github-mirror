@@ -3803,7 +3803,7 @@ stats_cache = TTLCache(default_ttl=600)  # 10 min TTL for stats
 async def _fetch_stats_with_retry(path: str, max_retries: int = 5, interval: int = 3):
     """GitHub Stats API 首次请求可能返回 202，需轮询等待"""
     for attempt in range(max_retries):
-        data, status = github_api_get(path)
+        status, data = github_api_get(path)
         if status == 200 and data is not None:
             return data
         if status == 202:
@@ -3875,7 +3875,7 @@ async def get_starred_repos(request: Request):
     # 将 params 转换为 URL 查询字符串
     query_string = "&".join(f"{k}={v}" for k, v in params.items())
     path = f"/user/starred?{query_string}" if query_string else "/user/starred"
-    data, status = github_api_get(path)
+    status, data = github_api_get(path)
     if status == 200 and isinstance(data, list):
         return data
     return []
@@ -3883,7 +3883,7 @@ async def get_starred_repos(request: Request):
 @app.get("/api/github/repos/{repo_name}/readme")
 async def get_readme(repo_name: str):
     """获取仓库 README 原始内容 (v5.4.0)"""
-    data, status = github_api_get(f"/repos/{repo_name}/readme")
+    status, data = github_api_get(f"/repos/{repo_name}/readme")
     if status != 200 or not data:
         return {"content": None, "name": None, "path": None}
     import base64
@@ -3905,19 +3905,27 @@ async def get_branches(repo_name: str, request: Request):
     """获取仓库分支列表 (v5.4.0)"""
     params = dict(request.query_params)
     params.setdefault("per_page", "30")
-    return github_api_get(f"/repos/{repo_name}/branches", params=params)
+    query_string = "&".join(f"{k}={v}" for k, v in params.items())
+    status, data = github_api_get(f"/repos/{repo_name}/branches?{query_string}")
+    if status == 200 and isinstance(data, list):
+        return data
+    return []
 
 @app.get("/api/github/repos/{repo_name}/releases")
 async def get_releases(repo_name: str, request: Request):
     """获取仓库发布版本列表 (v5.4.0)"""
     params = dict(request.query_params)
     params.setdefault("per_page", "10")
-    return github_api_get(f"/repos/{repo_name}/releases", params=params)
+    query_string = "&".join(f"{k}={v}" for k, v in params.items())
+    status, data = github_api_get(f"/repos/{repo_name}/releases?{query_string}")
+    if status == 200 and isinstance(data, list):
+        return data
+    return []
 
 @app.get("/api/github/repos/{repo_name}/contents/{path:path}")
 async def get_contents(repo_name: str, path: str = ""):
     """获取仓库文件/目录内容 (v5.4.0)"""
-    data, status = github_api_get(f"/repos/{repo_name}/contents/{path}")
+    status, data = github_api_get(f"/repos/{repo_name}/contents/{path}")
     if status == 200:
         return data if data else []
     return []
@@ -3930,7 +3938,11 @@ async def get_commits(repo_name: str, request: Request):
     branch = params.pop("branch", None)
     if branch:
         params["sha"] = branch
-    return github_api_get(f"/repos/{repo_name}/commits", params=params)
+    query_string = "&".join(f"{k}={v}" for k, v in params.items())
+    status, data = github_api_get(f"/repos/{repo_name}/commits?{query_string}")
+    if status == 200 and isinstance(data, list):
+        return data
+    return []
 
 
 # ──────────────────────────────────────────────
@@ -3970,7 +3982,7 @@ async def get_trending_repos(
         "per_page": "10",
     })
     
-    data, status = github_api_get(f"/search/repositories?{query_string}")
+    status, data = github_api_get(f"/search/repositories?{query_string}")
     if status == 200 and data:
         items = data.get("items", [])
         # 格式化返回数据
