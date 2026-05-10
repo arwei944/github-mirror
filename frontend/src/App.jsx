@@ -23,6 +23,7 @@ const Profile = lazy(() => import('./pages/Profile'))
 const Settings = lazy(() => import('./pages/Settings'))
 const Security = lazy(() => import('./pages/Security'))
 const Discussions = lazy(() => import('./pages/Discussions'))
+const Analytics = lazy(() => import('./pages/Analytics'))
 
 // ============ Icons ============
 const Icon = {
@@ -112,6 +113,9 @@ const Icon = {
   ),
   messageCircle: (s = 14) => (
     <svg width={s} height={s} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path d="M21 11.5a8.38 8.38 0 01-.9 3.8 8.5 8.5 0 01-7.6 4.7 8.38 8.38 0 01-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 01-.9-3.8 8.5 8.5 0 014.7-7.6 8.38 8.38 0 013.8-.9h.5a8.48 8.48 0 018 8v.5z"/></svg>
+  ),
+  barChart: (s = 14) => (
+    <svg width={s} height={s} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path d="M18 20V10M12 20V4M6 20v-6"/></svg>
   ),
   moon: (s = 16) => (
     <svg width={s} height={s} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z"/></svg>
@@ -248,6 +252,7 @@ export default function App() {
     { key: 'settings', label: '设置', icon: Icon.tag(16) },
     { key: 'activity', label: '活动流', icon: Icon.activity(16), badge: unreadCount },
     { key: 'security', label: '安全中心', icon: Icon.zap(16) },
+    { key: 'analytics', label: '数据分析', icon: Icon.barChart(16) },
     { key: 'deploy', label: '部署管理', icon: Icon.deploy(16) },
   ]
 
@@ -432,6 +437,14 @@ export default function App() {
             </Suspense>
           </ErrorBoundary>
         )
+      case 'analytics':
+        return (
+          <ErrorBoundary>
+            <Suspense fallback={<SkeletonLoader />}>
+              <Analytics githubRepos={githubRepos} />
+            </Suspense>
+          </ErrorBoundary>
+        )
       case 'deploy':
         return (
           <ErrorBoundary>
@@ -451,7 +464,7 @@ export default function App() {
       <div className="mobile-header">
         <HamburgerMenu isOpen={sidebarOpen} onClick={() => setSidebarOpen(prev => !prev)} />
         <span style={{ fontSize: 15, fontWeight: 600, letterSpacing: '-0.02em' }}>GitHub Mirror</span>
-        <span style={{ fontSize: 9, padding: '1px 6px', borderRadius: 8, background: 'var(--mac-accent)', color: 'white', fontWeight: 500 }}>v5.2</span>
+        <span style={{ fontSize: 9, padding: '1px 6px', borderRadius: 8, background: 'var(--mac-accent)', color: 'white', fontWeight: 500 }}>v5.3</span>
       </div>
 
       {/* Mobile sidebar overlay */}
@@ -466,7 +479,7 @@ export default function App() {
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <span style={{ color: 'var(--mac-text)' }}>{Icon.github(18)}</span>
             <span className="sidebar-title" style={{ fontSize: 15, fontWeight: 600, letterSpacing: '-0.02em' }}>GitHub Mirror</span>
-            <span className="sidebar-version" style={{ fontSize: 9, padding: '1px 6px', borderRadius: 8, background: 'var(--mac-accent)', color: 'white', fontWeight: 500 }}>v5.2</span>
+            <span className="sidebar-version" style={{ fontSize: 9, padding: '1px 6px', borderRadius: 8, background: 'var(--mac-accent)', color: 'white', fontWeight: 500 }}>v5.3</span>
           </div>
           {/* Theme toggle */}
           <button
