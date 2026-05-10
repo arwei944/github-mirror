@@ -3095,12 +3095,12 @@ def run_deploy(project_name: str, project_config: dict):
             shutil.rmtree(work_dir)
         os.makedirs(work_dir, exist_ok=True)
 
-        # Step 1: 从 GitHub 克隆
+        # Step 1: 从 GitHub 克隆 (不用 --depth 1，避免 shallow update not allowed)
         clone_url = f"https://{GITHUB_TOKEN}@github.com/{github_repo}.git"
         print(f"[部署] {project_name} 正在克隆 {github_repo} ...")
 
         clone_result = subprocess.run(
-            ["git", "clone", "--depth", "1", "--branch", branch, clone_url, repo_dir],
+            ["git", "clone", "--branch", branch, clone_url, repo_dir],
             capture_output=True, text=True, timeout=300,
         )
         if clone_result.returncode != 0:
