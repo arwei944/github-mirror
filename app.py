@@ -815,6 +815,42 @@ async def get_webhook_events(per_page: int = Query(50, ge=1, le=100)):
     return _webhook_events[:per_page]
 
 
+@app.get("/api/config")
+async def get_config():
+    """
+    获取应用配置 (v5.4.5)
+    """
+    return {
+        "github_user": GITHUB_USER,
+        "github_token_set": bool(GITHUB_TOKEN),
+        "hf_user": HF_USER,
+        "hf_token_set": bool(HF_TOKEN),
+    }
+
+
+@app.post("/api/config")
+async def update_config(request: Request):
+    """
+    更新应用配置 (v5.4.5)
+    注意：Token 类配置需要通过环境变量设置，这里只更新用户名等非敏感配置
+    """
+    import json
+    try:
+        body = await request.body()
+        data = json.loads(body)
+        
+        # 更新全局变量（仅限允许更新的字段）
+        global GITHUB_USER, HF_USER
+        if data.get("github_user"):
+            GITHUB_USER = data["github_user"]
+        if data.get("hf_user"):
+            HF_USER = data["hf_user"]
+        
+        return {"status": "saved", "github_user": GITHUB_USER, "hf_user": HF_USER}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+
 @app.delete("/api/webhooks/events")
 async def clear_webhook_events():
     """

@@ -22,6 +22,7 @@ const CodeBrowse = lazy(() => import('./pages/CodeBrowse'))
 const Search = lazy(() => import('./pages/Search'))
 const Profile = lazy(() => import('./pages/Profile'))
 const Settings = lazy(() => import('./pages/Settings'))
+const GlobalSettings = lazy(() => import('./pages/GlobalSettings'))
 const Security = lazy(() => import('./pages/Security'))
 const Discussions = lazy(() => import('./pages/Discussions'))
 const Analytics = lazy(() => import('./pages/Analytics'))
@@ -259,7 +260,8 @@ export default function App() {
     { key: 'search', label: '搜索', icon: Icon.search(16) },
     { key: 'discussions', label: '讨论区', icon: Icon.messageCircle(16) },
     { key: 'profile', label: '个人中心', icon: Icon.users(16) },
-    { key: 'settings', label: '设置', icon: Icon.tag(16) },
+    { key: 'settings', label: '仓库设置', icon: Icon.settings(16) },
+    { key: 'global-settings', label: '全局设置', icon: Icon.settings(16) },
     { key: 'activity', label: '活动流', icon: Icon.activity(16), badge: unreadCount },
     { key: 'security', label: '安全中心', icon: Icon.zap(16) },
     { key: 'analytics', label: '数据分析', icon: Icon.barChart(16) },
@@ -448,6 +450,14 @@ export default function App() {
             </Suspense>
           </ErrorBoundary>
         )
+      case 'global-settings':
+        return (
+          <ErrorBoundary>
+            <Suspense fallback={<SkeletonLoader />}>
+              <GlobalSettings />
+            </Suspense>
+          </ErrorBoundary>
+        )
       case 'activity':
         return (
           <ErrorBoundary>
@@ -506,7 +516,7 @@ export default function App() {
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <span style={{ color: 'var(--mac-text)' }}>{Icon.github(18)}</span>
             <span className="sidebar-title" style={{ fontSize: 15, fontWeight: 600, letterSpacing: '-0.02em' }}>GitHub Mirror</span>
-            <span className="sidebar-version" style={{ fontSize: 9, padding: '1px 6px', borderRadius: 8, background: 'var(--mac-accent)', color: 'white', fontWeight: 500 }}>v5.4.5</span>
+            <span className="sidebar-version" style={{ fontSize: 9, padding: '1px 6px', borderRadius: 8, background: 'var(--mac-accent)', color: 'white', fontWeight: 500 }}>v5.4.6</span>
           </div>
           {/* Theme toggle */}
           <button
