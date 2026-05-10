@@ -3872,7 +3872,10 @@ async def get_starred_repos(request: Request):
     params = dict(request.query_params)
     params.setdefault("per_page", "30")
     params.setdefault("sort", "updated")
-    data, status = github_api_get("/user/starred", params=params)
+    # 将 params 转换为 URL 查询字符串
+    query_string = "&".join(f"{k}={v}" for k, v in params.items())
+    path = f"/user/starred?{query_string}" if query_string else "/user/starred"
+    data, status = github_api_get(path)
     if status == 200 and isinstance(data, list):
         return data
     return []
@@ -3958,14 +3961,16 @@ async def get_trending_repos(
         query_parts.append(f"pushed:>{since_date}")
     
     query = " ".join(query_parts)
-    params = {
+    # 将参数转换为 URL 查询字符串
+    import urllib.parse
+    query_string = urllib.parse.urlencode({
         "q": query,
         "sort": "stars",
         "order": "desc",
         "per_page": "10",
-    }
+    })
     
-    data, status = github_api_get("/search/repositories", params=params)
+    data, status = github_api_get(f"/search/repositories?{query_string}")
     if status == 200 and data:
         items = data.get("items", [])
         # 格式化返回数据
