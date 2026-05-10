@@ -20,7 +20,7 @@ from fastapi import FastAPI, Query, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 
-__version__ = "5.0.0"
+__version__ = "5.1.0"
 
 app = FastAPI(
     version=__version__,
@@ -3401,6 +3401,241 @@ async def general_exception_handler(request: Request, exc: Exception):
             "status_code": 500,
         },
     )
+
+
+# ──────────────────────────────────────────────
+# GraphQL 代理 (v5.1.0)
+# ──────────────────────────────────────────────
+def calculate_query_depth(query_str: str, max_depth: int = 10) -> int:
+    """计算 GraphQL 查询深度"""
+    import re
+    depth = 0
+    max_seen = 0
+    for char in query_str:
+        if char == '{':
+            depth += 1
+            max_seen = max(max_seen, depth)
+        elif char == '}':
+            depth -= 1
+    return max_seen
+
+def calculate_query_complexity(query_str: str, max_complexity: int = 500) -> int:
+    """计算 GraphQL 查询复杂度"""
+    import re
+    complexity = 0
+    # Remove string literals and comments
+    cleaned = re.sub(r'"(?:[^"\\]|\\.)*"', '', query_str)
+    cleaned = re.sub(r'#.*$', '', cleaned, flags=re.MULTILINE)
+    # Count field types
+    # Connection fields (ending in Connection, edges, nodes)
+    connections = len(re.findall(r'\b\w+(?:Connection|edges|nodes)\b', cleaned))
+    complexity += connections * 10
+    # Object fields (capitalized)
+    objects = len(re.findall(r'\b[A-Z]\w*\b', cleaned))
+    complexity += objects * 5
+    # Scalar fields (lowercase)
+    scalars = len(re.findall(r'\b[a-z_]\w*\s*(?:\(|:|\{|$)', cleaned))
+    complexity += scalars * 1
+    return complexity
+
+GITHUB_GRAPHQL_URL = "https://api.github.com/graphql"
+GRAPHQL_CACHE = TTLCache(default_ttl=60)
+
+@app.post("/api/github/graphql")
+async def graphql_proxy(request: Request):
+    """GraphQL 代理端点 (v5.1.0)"""
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid JSON body")
+
+    query = body.get("query", "")
+    variables = body.get("variables", {})
+    operation_name = body.get("operationName")
+
+    if not query:
+        raise HTTPException(status_code=400, detail="Missing 'query' field")
+
+    # Depth check
+    depth = calculate_query_depth(query)
+    if depth > 10:
+        raise HTTPException(status_code=400, detail={
+            "error": "Query too deep",
+            "code": 1006,
+            "detail": f"depth: {depth}, max: 10"
+        })
+
+    # Complexity check
+    complexity = calculate_query_complexity(query)
+    if complexity > 500:
+        raise HTTPException(status_code=400, detail={
+            "error": "Query too complex",
+            "code": 1006,
+            "detail": f"complexity: {complexity}, max: 500"
+        })
+
+    # Cache check
+    import hashlib, json as _json
+    cache_key = hashlib.md5(f"{query}{_json.dumps(variables, sort_keys=True)}".encode()).hexdigest()
+    cached = GRAPHQL_CACHE.get(cache_key)
+    if cached is not None:
+        return cached
+
+    # Forward to GitHub GraphQL API
+    token = os.environ.get("GITHUB_TOKEN")
+    if not token:
+        raise HTTPException(status_code=500, detail="GITHUB_TOKEN not configured")
+
+    import httpx
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Content-Type": "application/json",
+    }
+    payload = {"query": query}
+    if variables:
+        payload["variables"] = variables
+    if operation_name:
+        payload["operationName"] = operation_name
+
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        resp = await client.post(GITHUB_GRAPHQL_URL, json=payload, headers=headers)
+
+    data = resp.json()
+    GRAPHQL_CACHE.set(cache_key, data, ttl=60)
+    return data
+
+@app.post("/api/github/repos/{repo_name}/discussions")
+async def create_discussion(repo_name: str, request: Request):
+    """创建 Discussion (v5.1.0) - 通过 GraphQL mutation"""
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid JSON body")
+
+    title = body.get("title", "")
+    discussion_body = body.get("body", "")
+    category_id = body.get("category_id", "")
+    repository_id = body.get("repository_id", f"owner:{repo_name}")
+
+    if not title or not discussion_body or not category_id:
+        raise HTTPException(status_code=400, detail="title, body, and category_id are required")
+
+    # If repository_id looks like "owner/repo", resolve it via GraphQL
+    if ":" in repository_id:
+        repo_query = f'repository(owner: "{repository_id.split(":")[0]}", name: "{repository_id.split(":")[1]}") {{ id }}'
+        resolve_result = await graphql_proxy(Request(scope={"type": "http", "method": "POST"}, receive=lambda: None))
+        # Use direct GraphQL call instead
+        token = os.environ.get("GITHUB_TOKEN")
+        if not token:
+            raise HTTPException(status_code=500, detail="GITHUB_TOKEN not configured")
+        import httpx
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            resp = await client.post(
+                GITHUB_GRAPHQL_URL,
+                json={"query": f'{{ {repo_query} }}'},
+                headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+            )
+        repo_data = resp.json()
+        actual_repo_id = repo_data.get("data", {}).get("repository", {}).get("id")
+        if not actual_repo_id:
+            raise HTTPException(status_code=404, detail=f"Repository {repo_name} not found")
+        repository_id = actual_repo_id
+
+    mutation = """
+    mutation($title: String!, $body: String!, $categoryId: ID!, $repoId: ID!) {
+      createDiscussion(input: {
+        title: $title,
+        body: $body,
+        categoryId: $categoryId,
+        repositoryId: $repoId
+      }) {
+        discussion {
+          number
+          title
+          url
+          createdAt
+        }
+      }
+    }
+    """
+    token = os.environ.get("GITHUB_TOKEN")
+    if not token:
+        raise HTTPException(status_code=500, detail="GITHUB_TOKEN not configured")
+
+    import httpx
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        resp = await client.post(
+            GITHUB_GRAPHQL_URL,
+            json={
+                "query": mutation,
+                "variables": {
+                    "title": title,
+                    "body": discussion_body,
+                    "categoryId": category_id,
+                    "repoId": repository_id,
+                }
+            },
+            headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+        )
+
+    result = resp.json()
+    if "errors" in result:
+        raise HTTPException(status_code=400, detail=result["errors"][0].get("message", "GraphQL error"))
+    return result.get("data", {}).get("createDiscussion", {}).get("discussion", {})
+
+@app.post("/api/github/repos/{repo_name}/discussions/{discussion_id}/comments")
+async def add_discussion_comment(repo_name: str, discussion_id: str, request: Request):
+    """添加 Discussion 评论 (v5.1.0)"""
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid JSON body")
+
+    comment_body = body.get("body", "")
+    reply_to_id = body.get("reply_to_id")
+
+    if not comment_body:
+        raise HTTPException(status_code=400, detail="body is required")
+
+    mutation = """
+    mutation($body: String!, $discussionId: ID!, $replyToId: ID) {
+      addDiscussionComment(input: {
+        body: $body,
+        discussionId: $discussionId,
+        replyToId: $replyToId
+      }) {
+        comment {
+          id
+          body
+          author { login }
+          createdAt
+        }
+      }
+    }
+    """
+    token = os.environ.get("GITHUB_TOKEN")
+    if not token:
+        raise HTTPException(status_code=500, detail="GITHUB_TOKEN not configured")
+
+    import httpx
+    variables = {
+        "body": comment_body,
+        "discussionId": discussion_id,
+    }
+    if reply_to_id:
+        variables["replyToId"] = reply_to_id
+
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        resp = await client.post(
+            GITHUB_GRAPHQL_URL,
+            json={"query": mutation, "variables": variables},
+            headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+        )
+
+    result = resp.json()
+    if "errors" in result:
+        raise HTTPException(status_code=400, detail=result["errors"][0].get("message", "GraphQL error"))
+    return result.get("data", {}).get("addDiscussionComment", {}).get("comment", {})
 
 
 # ──────────────────────────────────────────────

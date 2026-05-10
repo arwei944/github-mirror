@@ -22,6 +22,7 @@ const Search = lazy(() => import('./pages/Search'))
 const Profile = lazy(() => import('./pages/Profile'))
 const Settings = lazy(() => import('./pages/Settings'))
 const Security = lazy(() => import('./pages/Security'))
+const Discussions = lazy(() => import('./pages/Discussions'))
 
 // ============ Icons ============
 const Icon = {
@@ -108,6 +109,9 @@ const Icon = {
   ),
   sun: (s = 16) => (
     <svg width={s} height={s} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><circle cx="12" cy="12" r="5"/><path d="M12 1v2m0 18v2M4.22 4.22l1.42 1.42m12.72 12.72l1.42 1.42M1 12h2m18 0h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>
+  ),
+  messageCircle: (s = 14) => (
+    <svg width={s} height={s} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path d="M21 11.5a8.38 8.38 0 01-.9 3.8 8.5 8.5 0 01-7.6 4.7 8.38 8.38 0 01-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 01-.9-3.8 8.5 8.5 0 014.7-7.6 8.38 8.38 0 013.8-.9h.5a8.48 8.48 0 018 8v.5z"/></svg>
   ),
   moon: (s = 16) => (
     <svg width={s} height={s} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z"/></svg>
@@ -231,6 +235,7 @@ export default function App() {
     { key: 'actions', label: 'Actions', icon: Icon.zap(16) },
     { key: 'code', label: '代码浏览', icon: Icon.code(16) },
     { key: 'search', label: '搜索', icon: Icon.search(16) },
+    { key: 'discussions', label: '讨论区', icon: Icon.messageCircle(16) },
     { key: 'profile', label: '个人中心', icon: Icon.users(16) },
     { key: 'settings', label: '设置', icon: Icon.tag(16) },
     { key: 'activity', label: '活动流', icon: Icon.activity(16) },
@@ -354,6 +359,14 @@ export default function App() {
             </Suspense>
           </ErrorBoundary>
         )
+      case 'discussions':
+        return (
+          <ErrorBoundary>
+            <Suspense fallback={<SkeletonLoader />}>
+              <Discussions githubRepos={githubRepos} />
+            </Suspense>
+          </ErrorBoundary>
+        )
       case 'profile':
         return (
           <ErrorBoundary>
@@ -405,7 +418,7 @@ export default function App() {
       <div className="mobile-header">
         <HamburgerMenu isOpen={sidebarOpen} onClick={() => setSidebarOpen(prev => !prev)} />
         <span style={{ fontSize: 15, fontWeight: 600, letterSpacing: '-0.02em' }}>GitHub Mirror</span>
-        <span style={{ fontSize: 9, padding: '1px 6px', borderRadius: 8, background: 'var(--mac-accent)', color: 'white', fontWeight: 500 }}>v5.0</span>
+        <span style={{ fontSize: 9, padding: '1px 6px', borderRadius: 8, background: 'var(--mac-accent)', color: 'white', fontWeight: 500 }}>v5.1</span>
       </div>
 
       {/* Mobile sidebar overlay */}
@@ -420,7 +433,7 @@ export default function App() {
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <span style={{ color: 'var(--mac-text)' }}>{Icon.github(18)}</span>
             <span className="sidebar-title" style={{ fontSize: 15, fontWeight: 600, letterSpacing: '-0.02em' }}>GitHub Mirror</span>
-            <span className="sidebar-version" style={{ fontSize: 9, padding: '1px 6px', borderRadius: 8, background: 'var(--mac-accent)', color: 'white', fontWeight: 500 }}>v5.0</span>
+            <span className="sidebar-version" style={{ fontSize: 9, padding: '1px 6px', borderRadius: 8, background: 'var(--mac-accent)', color: 'white', fontWeight: 500 }}>v5.1</span>
           </div>
           {/* Theme toggle */}
           <button
