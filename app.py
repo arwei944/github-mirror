@@ -495,8 +495,16 @@ def enrich_event(event: dict) -> dict:
     if event_type == "PushEvent":
         commits = payload.get("commits", [])
         commit_count = len(commits) if commits else payload.get("size", 0)
+        # 如果没有 commits 和 size，通过 head/before 推断
+        if commit_count == 0:
+            head = payload.get("head", "")
+            before = payload.get("before", "")
+            # head 和 before 不同说明有提交
+            if head and before and head != before:
+                commit_count = 1
+        ref = payload.get("ref", "").replace("refs/heads/", "")
         enriched["action"] = "push"
-        enriched["detail"] = f"推送了 {commit_count} 个提交到 {payload.get('ref', '')}"
+        enriched["detail"] = f"推送了 {commit_count} 个提交到 {ref}" if commit_count > 0 else f"推送到 {ref}"
         enriched["commit_count"] = commit_count
         enriched["ref"] = payload.get("ref", "")
 
