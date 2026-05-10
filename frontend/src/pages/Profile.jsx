@@ -2,8 +2,9 @@ import { useState, useEffect } from 'react'
 import { Icon } from '../App'
 import api from '../api'
 
-function ProgressBar({ label, remaining, total, color }) {
+function ProgressBar({ label, remaining, total }) {
   const pct = total > 0 ? Math.min((remaining / total) * 100, 100) : 0
+  const percentage = total > 0 ? ((total - remaining) / total) * 100 : 0
   return (
     <div style={{ marginBottom: 10 }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, marginBottom: 4 }}>
@@ -16,7 +17,7 @@ function ProgressBar({ label, remaining, total, color }) {
       }}>
         <div style={{
           width: `${pct}%`, height: '100%', borderRadius: 3,
-          background: color || 'var(--mac-accent)',
+          background: percentage >= 90 ? 'var(--mac-red)' : percentage >= 75 ? 'var(--mac-orange)' : 'var(--mac-green)',
           transition: 'width 0.3s ease',
         }} />
       </div>
@@ -424,7 +425,6 @@ export default function Profile() {
               label="Core 请求"
               remaining={coreRate.remaining}
               total={coreRate.limit}
-              color={coreRate.remaining > 100 ? 'var(--mac-green)' : coreRate.remaining > 20 ? 'var(--mac-orange)' : 'var(--mac-red)'}
             />
             {coreRate.reset && (
               <div style={{ fontSize: 11, color: 'var(--mac-text-secondary)', marginBottom: 12 }}>
@@ -436,7 +436,6 @@ export default function Profile() {
               label="Search 请求"
               remaining={searchRate.remaining}
               total={searchRate.limit}
-              color={searchRate.remaining > 10 ? 'var(--mac-green)' : searchRate.remaining > 3 ? 'var(--mac-orange)' : 'var(--mac-red)'}
             />
             {searchRate.reset && (
               <div style={{ fontSize: 11, color: 'var(--mac-text-secondary)' }}>
