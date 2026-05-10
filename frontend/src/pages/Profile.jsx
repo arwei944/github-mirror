@@ -45,6 +45,43 @@ export default function Profile() {
   const [saving, setSaving] = useState(false)
   const [message, setMessage] = useState('')
 
+  // SSH keys
+  const [sshKeys, setSshKeys] = useState([])
+  const [sshLoading, setSshLoading] = useState(false)
+  const [showAddSsh, setShowAddSsh] = useState(false)
+  const [sshTitle, setSshTitle] = useState('')
+  const [sshKey, setSshKey] = useState('')
+  const [sshSaving, setSshSaving] = useState(false)
+
+  // GPG keys
+  const [gpgKeys, setGpgKeys] = useState([])
+  const [gpgLoading, setGpgLoading] = useState(false)
+  const [showAddGpg, setShowAddGpg] = useState(false)
+  const [gpgArmoredKey, setGpgArmoredKey] = useState('')
+  const [gpgSaving, setGpgSaving] = useState(false)
+
+  const loadSshKeys = () => {
+    setSshLoading(true)
+    api.get('/api/github/user/keys').then(data => {
+      setSshKeys(Array.isArray(data) ? data : [])
+      setSshLoading(false)
+    }).catch(() => {
+      setSshKeys([])
+      setSshLoading(false)
+    })
+  }
+
+  const loadGpgKeys = () => {
+    setGpgLoading(true)
+    api.get('/api/github/user/gpg_keys').then(data => {
+      setGpgKeys(Array.isArray(data) ? data : [])
+      setGpgLoading(false)
+    }).catch(() => {
+      setGpgKeys([])
+      setGpgLoading(false)
+    })
+  }
+
   useEffect(() => {
     setLoading(true)
     Promise.all([
@@ -64,6 +101,8 @@ export default function Profile() {
       }
       setLoading(false)
     })
+    loadSshKeys()
+    loadGpgKeys()
   }, [])
 
   const handleSave = async () => {
@@ -84,6 +123,57 @@ export default function Profile() {
       setMessage('保存失败: ' + (err.message || '未知错误'))
     } finally {
       setSaving(false)
+    }
+  }
+
+  const handleAddSsh = async () => {
+    if (!sshTitle.trim() || !sshKey.trim()) return
+    setSshSaving(true)
+    try {
+      await api.post('/api/github/user/keys', { title: sshTitle, key: sshKey })
+      setSshTitle('')
+      setSshKey('')
+      setShowAddSsh(false)
+      loadSshKeys()
+    } catch (err) {
+      setMessage('添加 SSH 密钥失败: ' + (err.message || '未知错误'))
+    } finally {
+      setSshSaving(false)
+    }
+  }
+
+  const handleDeleteSsh = async (id) => {
+    if (!window.confirm('确定要删除此 SSH 密钥吗？')) return
+    try {
+      await api.del(`/api/github/user/keys/${id}`)
+      loadSshKeys()
+    } catch (err) {
+      setMessage('删除 SSH 密钥失败: ' + (err.message || '未知错误'))
+    }
+  }
+
+  const handleAddGpg = async () => {
+    if (!gpgArmoredKey.trim()) return
+    setGpgSaving(true)
+    try {
+      await api.post('/api/github/user/gpg_keys', { armored_public_key: gpgArmoredKey })
+      setGpgArmoredKey('')
+      setShowAddGpg(false)
+      loadGpgKeys()
+    } catch (err) {
+      setMessage('添加 GPG 密钥失败: ' + (err.message || '未知错误'))
+    } finally {
+      setGpgSaving(false)
+    }
+  }
+
+  const handleDeleteGpg = async (id) => {
+    if (!window.confirm('确定要删除此 GPG 密钥吗？')) return
+    try {
+      await api.del(`/api/github/user/gpg_keys/${id}`)
+      loadGpgKeys()
+    } catch (err) {
+      setMessage('删除 GPG 密钥失败: ' + (err.message || '未知错误'))
     }
   }
 
@@ -322,7 +412,7 @@ export default function Profile() {
       </div>
 
       {/* API Rate Limit */}
-      <div className="glass" style={{ padding: 20 }}>
+      <div className="glass" style={{ padding: 20, marginBottom: 16 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 16 }}>
           {Icon.zap(16)}
           <span style={{ fontSize: 14, fontWeight: 600 }}>API 速率限制</span>
@@ -357,6 +447,242 @@ export default function Profile() {
         ) : (
           <div style={{ textAlign: 'center', padding: 24, color: 'var(--mac-text-secondary)', fontSize: 13 }}>
             无法加载速率限制信息
+          </div>
+        )}
+      </div>
+
+      {/* SSH Keys */}
+      <div className="glass" style={{ padding: 20, marginBottom: 16 }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            {Icon.lock(16)}
+            <span style={{ fontSize: 14, fontWeight: 600 }}>SSH 密钥</span>
+          </div>
+          <button
+            className="btn-secondary"
+            onClick={() => setShowAddSsh(!showAddSsh)}
+            style={{ fontSize: 12, padding: '4px 12px', display: 'flex', alignItems: 'center', gap: 4 }}
+          >
+            {Icon.plus(12)} 添加
+          </button>
+        </div>
+
+        {showAddSsh && (
+          <div className="animate-fade-in" style={{
+            marginBottom: 12, padding: 12, borderRadius: 'var(--mac-radius)',
+            background: 'var(--mac-bg)', border: '1px solid var(--mac-border)',
+            display: 'flex', flexDirection: 'column', gap: 10,
+          }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+              <label style={{ fontSize: 12, fontWeight: 500, color: 'var(--mac-text-secondary)' }}>标题</label>
+              <input
+                type="text"
+                value={sshTitle}
+                onChange={e => setSshTitle(e.target.value)}
+                placeholder="例如: My MacBook"
+                style={{
+                  padding: '6px 12px', borderRadius: 'var(--mac-radius)',
+                  border: '1px solid var(--mac-border)', background: 'var(--mac-surface)',
+                  color: 'var(--mac-text)', fontSize: 13, outline: 'none',
+                }}
+              />
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+              <label style={{ fontSize: 12, fontWeight: 500, color: 'var(--mac-text-secondary)' }}>公钥</label>
+              <textarea
+                value={sshKey}
+                onChange={e => setSshKey(e.target.value)}
+                placeholder="ssh-rsa AAAA..."
+                rows={4}
+                style={{
+                  padding: '8px 12px', borderRadius: 'var(--mac-radius)',
+                  border: '1px solid var(--mac-border)', background: 'var(--mac-surface)',
+                  color: 'var(--mac-text)', fontSize: 12, outline: 'none',
+                  resize: 'vertical', fontFamily: 'monospace', lineHeight: 1.5,
+                }}
+              />
+            </div>
+            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+              <button
+                className="btn-secondary"
+                onClick={() => { setShowAddSsh(false); setSshTitle(''); setSshKey('') }}
+                style={{ fontSize: 12, padding: '4px 12px' }}
+              >
+                取消
+              </button>
+              <button
+                className="btn-primary"
+                onClick={handleAddSsh}
+                disabled={sshSaving || !sshTitle.trim() || !sshKey.trim()}
+                style={{ fontSize: 12, padding: '4px 12px' }}
+              >
+                {sshSaving ? '保存中...' : '保存'}
+              </button>
+            </div>
+          </div>
+        )}
+
+        {sshLoading ? (
+          <div style={{ textAlign: 'center', padding: 16, color: 'var(--mac-text-secondary)', fontSize: 13 }}>
+            <span style={{ animation: 'pulse-dot 1s infinite' }}>&#9679;</span> 加载中...
+          </div>
+        ) : sshKeys.length === 0 ? (
+          <div style={{ textAlign: 'center', padding: 16, color: 'var(--mac-text-secondary)', fontSize: 13 }}>
+            暂无 SSH 密钥
+          </div>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {sshKeys.map(k => (
+              <div key={k.id} style={{
+                padding: '10px 14px', borderRadius: 8,
+                background: 'var(--mac-bg)', border: '1px solid var(--mac-border)',
+                display: 'flex', alignItems: 'center', gap: 12,
+              }}>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 13, fontWeight: 500, color: 'var(--mac-text)', marginBottom: 2 }}>
+                    {k.title}
+                  </div>
+                  <div style={{ fontSize: 11, color: 'var(--mac-text-secondary)', fontFamily: 'monospace', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {k.key ? (k.key.length > 40 ? k.key.substring(0, 40) + '...' : k.key) : ''}
+                  </div>
+                  {k.created_at && (
+                    <div style={{ fontSize: 10, color: 'var(--mac-text-secondary)', marginTop: 2 }}>
+                      添加于 {new Date(k.created_at).toLocaleDateString('zh-CN')}
+                    </div>
+                  )}
+                </div>
+                <button
+                  onClick={() => handleDeleteSsh(k.id)}
+                  style={{
+                    background: 'none', border: 'none', cursor: 'pointer',
+                    color: 'var(--mac-text-secondary)', display: 'flex', alignItems: 'center', padding: 4,
+                  }}
+                  onMouseEnter={e => e.currentTarget.style.color = 'var(--mac-red)'}
+                  onMouseLeave={e => e.currentTarget.style.color = 'var(--mac-text-secondary)'}
+                  title="删除"
+                >
+                  {Icon.trash(14)}
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* GPG Keys */}
+      <div className="glass" style={{ padding: 20 }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            {Icon.lock(16)}
+            <span style={{ fontSize: 14, fontWeight: 600 }}>GPG 密钥</span>
+          </div>
+          <button
+            className="btn-secondary"
+            onClick={() => setShowAddGpg(!showAddGpg)}
+            style={{ fontSize: 12, padding: '4px 12px', display: 'flex', alignItems: 'center', gap: 4 }}
+          >
+            {Icon.plus(12)} 添加
+          </button>
+        </div>
+
+        {showAddGpg && (
+          <div className="animate-fade-in" style={{
+            marginBottom: 12, padding: 12, borderRadius: 'var(--mac-radius)',
+            background: 'var(--mac-bg)', border: '1px solid var(--mac-border)',
+            display: 'flex', flexDirection: 'column', gap: 10,
+          }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+              <label style={{ fontSize: 12, fontWeight: 500, color: 'var(--mac-text-secondary)' }}>GPG 公钥 (Armored)</label>
+              <textarea
+                value={gpgArmoredKey}
+                onChange={e => setGpgArmoredKey(e.target.value)}
+                placeholder="-----BEGIN PGP PUBLIC KEY BLOCK-----&#10;...&#10;-----END PGP PUBLIC KEY BLOCK-----"
+                rows={6}
+                style={{
+                  padding: '8px 12px', borderRadius: 'var(--mac-radius)',
+                  border: '1px solid var(--mac-border)', background: 'var(--mac-surface)',
+                  color: 'var(--mac-text)', fontSize: 12, outline: 'none',
+                  resize: 'vertical', fontFamily: 'monospace', lineHeight: 1.5,
+                }}
+              />
+            </div>
+            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+              <button
+                className="btn-secondary"
+                onClick={() => { setShowAddGpg(false); setGpgArmoredKey('') }}
+                style={{ fontSize: 12, padding: '4px 12px' }}
+              >
+                取消
+              </button>
+              <button
+                className="btn-primary"
+                onClick={handleAddGpg}
+                disabled={gpgSaving || !gpgArmoredKey.trim()}
+                style={{ fontSize: 12, padding: '4px 12px' }}
+              >
+                {gpgSaving ? '保存中...' : '保存'}
+              </button>
+            </div>
+          </div>
+        )}
+
+        {gpgLoading ? (
+          <div style={{ textAlign: 'center', padding: 16, color: 'var(--mac-text-secondary)', fontSize: 13 }}>
+            <span style={{ animation: 'pulse-dot 1s infinite' }}>&#9679;</span> 加载中...
+          </div>
+        ) : gpgKeys.length === 0 ? (
+          <div style={{ textAlign: 'center', padding: 16, color: 'var(--mac-text-secondary)', fontSize: 13 }}>
+            暂无 GPG 密钥
+          </div>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {gpgKeys.map(k => (
+              <div key={k.id} style={{
+                padding: '10px 14px', borderRadius: 8,
+                background: 'var(--mac-bg)', border: '1px solid var(--mac-border)',
+                display: 'flex', alignItems: 'center', gap: 12,
+              }}>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 2 }}>
+                    <code style={{ fontSize: 12, fontFamily: 'monospace', color: 'var(--mac-accent)' }}>
+                      {k.key_id ? (k.key_id.length > 16 ? k.key_id.substring(0, 16) + '...' : k.key_id) : 'N/A'}
+                    </code>
+                    {k.can_sign && (
+                      <span style={{ fontSize: 9, padding: '1px 6px', borderRadius: 6, background: 'rgba(52,199,89,0.12)', color: 'var(--mac-green)', fontWeight: 500 }}>
+                        可签名
+                      </span>
+                    )}
+                    {k.can_encrypt_comms && (
+                      <span style={{ fontSize: 9, padding: '1px 6px', borderRadius: 6, background: 'rgba(0,122,255,0.12)', color: 'var(--mac-accent)', fontWeight: 500 }}>
+                        可加密
+                      </span>
+                    )}
+                  </div>
+                  {k.emails && Array.isArray(k.emails) && k.emails.length > 0 && (
+                    <div style={{ fontSize: 11, color: 'var(--mac-text-secondary)' }}>
+                      {k.emails.map(e => e.email).join(', ')}
+                    </div>
+                  )}
+                  {k.created_at && (
+                    <div style={{ fontSize: 10, color: 'var(--mac-text-secondary)', marginTop: 2 }}>
+                      添加于 {new Date(k.created_at).toLocaleDateString('zh-CN')}
+                    </div>
+                  )}
+                </div>
+                <button
+                  onClick={() => handleDeleteGpg(k.id)}
+                  style={{
+                    background: 'none', border: 'none', cursor: 'pointer',
+                    color: 'var(--mac-text-secondary)', display: 'flex', alignItems: 'center', padding: 4,
+                  }}
+                  onMouseEnter={e => e.currentTarget.style.color = 'var(--mac-red)'}
+                  onMouseLeave={e => e.currentTarget.style.color = 'var(--mac-text-secondary)'}
+                  title="删除"
+                >
+                  {Icon.trash(14)}
+                </button>
+              </div>
+            ))}
           </div>
         )}
       </div>

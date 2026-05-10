@@ -20,7 +20,7 @@ from fastapi import FastAPI, Query, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 
-__version__ = "4.3.0"
+__version__ = "4.4.0"
 
 app = FastAPI(
     version=__version__,
@@ -2795,6 +2795,158 @@ async def get_git_commit(repo_name: str, sha: str):
     if status != 200:
         raise HTTPException(status_code=status, detail=f"获取 Git Commit 失败: {data}")
     return data
+
+
+# ──────────────────────────────────────────────
+# GitHub Edge Endpoints (v4.4.0)
+# ──────────────────────────────────────────────
+@app.put("/api/github/repos/{repo_name}/transfer")
+async def transfer_repo(repo_name: str, request: Request):
+    """转移仓库所有权"""
+    body = await request.json()
+    status, data = github_api_post(f"/repos/{GITHUB_USER}/{repo_name}/transfer", body)
+    if status != 202:
+        raise HTTPException(status_code=status, detail=f"转移仓库失败: {data}")
+    return data
+
+
+@app.get("/api/github/repos/{repo_name}/community/profile")
+async def get_community_profile(repo_name: str):
+    """获取社区健康度指标"""
+    status, data = github_api_get(f"/repos/{GITHUB_USER}/{repo_name}/community/profile")
+    if status == 404:
+        return {"health_percentage": 0, "files": {}, "updated_at": None}
+    if status != 200:
+        raise HTTPException(status_code=status, detail=f"获取社区资料失败: {data}")
+    return data
+
+
+@app.get("/api/github/repos/{repo_name}/license")
+async def get_repo_license(repo_name: str):
+    """获取仓库许可证信息"""
+    status, data = github_api_get(f"/repos/{GITHUB_USER}/{repo_name}/license")
+    if status == 404:
+        return {"key": None, "name": None, "spdx_id": None}
+    if status != 200:
+        raise HTTPException(status_code=status, detail=f"获取许可证失败: {data}")
+    return data
+
+
+@app.get("/api/github/user/keys")
+async def list_ssh_keys(per_page: int = Query(30, ge=1, le=100)):
+    """列出 SSH 密钥"""
+    qs = urllib.parse.urlencode({"per_page": per_page})
+    status, data = github_api_get(f"/user/keys?{qs}")
+    if status != 200:
+        raise HTTPException(status_code=status, detail=f"获取 SSH 密钥失败: {data}")
+    return data if isinstance(data, list) else []
+
+
+@app.post("/api/github/user/keys")
+async def create_ssh_key(request: Request):
+    """添加 SSH 密钥"""
+    body = await request.json()
+    status, data = github_api_post("/user/keys", body)
+    if status != 201:
+        raise HTTPException(status_code=status, detail=f"添加 SSH 密钥失败: {data}")
+    return data
+
+
+@app.delete("/api/github/user/keys/{key_id}")
+async def delete_ssh_key(key_id: int):
+    """删除 SSH 密钥"""
+    status, data = github_api_delete(f"/user/keys/{key_id}")
+    if status != 204:
+        raise HTTPException(status_code=status, detail=f"删除 SSH 密钥失败: {data}")
+    return {"message": "已删除 SSH 密钥"}
+
+
+@app.get("/api/github/user/gpg_keys")
+async def list_gpg_keys(per_page: int = Query(30, ge=1, le=100)):
+    """列出 GPG 密钥"""
+    qs = urllib.parse.urlencode({"per_page": per_page})
+    status, data = github_api_get(f"/user/gpg_keys?{qs}")
+    if status != 200:
+        raise HTTPException(status_code=status, detail=f"获取 GPG 密钥失败: {data}")
+    return data if isinstance(data, list) else []
+
+
+@app.post("/api/github/user/gpg_keys")
+async def create_gpg_key(request: Request):
+    """添加 GPG 密钥"""
+    body = await request.json()
+    status, data = github_api_post("/user/gpg_keys", body)
+    if status != 201:
+        raise HTTPException(status_code=status, detail=f"添加 GPG 密钥失败: {data}")
+    return data
+
+
+@app.delete("/api/github/user/gpg_keys/{gpg_key_id}")
+async def delete_gpg_key(gpg_key_id: int):
+    """删除 GPG 密钥"""
+    status, data = github_api_delete(f"/user/gpg_keys/{gpg_key_id}")
+    if status != 204:
+        raise HTTPException(status_code=status, detail=f"删除 GPG 密钥失败: {data}")
+    return {"message": "已删除 GPG 密钥"}
+
+
+@app.post("/api/github/markdown")
+async def render_markdown(request: Request):
+    """渲染 Markdown 为 HTML"""
+    body = await request.json()
+    status, data = github_api_post("/markdown", body)
+    if status != 200:
+        raise HTTPException(status_code=status, detail=f"Markdown 渲染失败: {data}")
+    return {"html": data}
+
+
+@app.post("/api/github/repos/{repo_name}/git/commits")
+async def create_git_commit(repo_name: str, request: Request):
+    """创建 Git 提交对象"""
+    body = await request.json()
+    status, data = github_api_post(f"/repos/{GITHUB_USER}/{repo_name}/git/commits", body)
+    if status != 201:
+        raise HTTPException(status_code=status, detail=f"创建 Git 提交失败: {data}")
+    return data
+
+
+@app.post("/api/github/repos/{repo_name}/git/trees")
+async def create_git_tree(repo_name: str, request: Request):
+    """创建 Git 树对象"""
+    body = await request.json()
+    status, data = github_api_post(f"/repos/{GITHUB_USER}/{repo_name}/git/trees", body)
+    if status != 201:
+        raise HTTPException(status_code=status, detail=f"创建 Git 树失败: {data}")
+    return data
+
+
+@app.post("/api/github/repos/{repo_name}/git/blobs")
+async def create_git_blob(repo_name: str, request: Request):
+    """创建 Git Blob 对象"""
+    body = await request.json()
+    status, data = github_api_post(f"/repos/{GITHUB_USER}/{repo_name}/git/blobs", body)
+    if status != 201:
+        raise HTTPException(status_code=status, detail=f"创建 Git Blob 失败: {data}")
+    return data
+
+
+@app.get("/api/github/repos/{repo_name}/contributors")
+async def list_contributors(repo_name: str, per_page: int = Query(30, ge=1, le=100)):
+    """获取仓库贡献者列表"""
+    qs = urllib.parse.urlencode({"per_page": per_page})
+    status, data = github_api_get(f"/repos/{GITHUB_USER}/{repo_name}/contributors?{qs}")
+    if status != 200:
+        raise HTTPException(status_code=status, detail=f"获取贡献者失败: {data}")
+    return [{"login": c.get("login", ""), "id": c.get("id", 0), "avatar_url": c.get("avatar_url", ""), "contributions": c.get("contributions", 0), "html_url": c.get("html_url", "")} for c in (data if isinstance(data, list) else [])]
+
+
+@app.get("/api/github/repos/{repo_name}/languages")
+async def get_repo_languages(repo_name: str):
+    """获取仓库语言分布"""
+    status, data = github_api_get(f"/repos/{GITHUB_USER}/{repo_name}/languages")
+    if status != 200:
+        raise HTTPException(status_code=status, detail=f"获取语言分布失败: {data}")
+    return data if isinstance(data, dict) else {}
 
 
 # ──────────────────────────────────────────────

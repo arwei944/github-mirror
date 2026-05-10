@@ -50,6 +50,12 @@ function BasicInfoTab({ repoName, onSaved }) {
   const [saving, setSaving] = useState(false)
   const [message, setMessage] = useState('')
 
+  // Transfer repo
+  const [showTransfer, setShowTransfer] = useState(false)
+  const [newOwner, setNewOwner] = useState('')
+  const [transferring, setTransferring] = useState(false)
+  const [transferMsg, setTransferMsg] = useState('')
+
   useEffect(() => {
     if (!repoName) return
     setLoading(true)
@@ -86,6 +92,24 @@ function BasicInfoTab({ repoName, onSaved }) {
       setMessage('保存失败: ' + (err.message || '未知错误'))
     } finally {
       setSaving(false)
+    }
+  }
+
+  const handleTransfer = async () => {
+    if (!newOwner.trim()) return
+    if (!window.confirm(`确定要将仓库 ${repoName} 转移给 ${newOwner.trim()} 吗？此操作不可逆！`)) return
+    setTransferring(true)
+    setTransferMsg('')
+    try {
+      await api.put(`/api/github/repos/${repoName}/transfer`, { new_owner: newOwner.trim() })
+      setTransferMsg('转移成功')
+      setShowTransfer(false)
+      setNewOwner('')
+      if (onSaved) onSaved()
+    } catch (err) {
+      setTransferMsg('转移失败: ' + (err.message || '未知错误'))
+    } finally {
+      setTransferring(false)
     }
   }
 
@@ -170,6 +194,92 @@ function BasicInfoTab({ repoName, onSaved }) {
         >
           {saving ? '保存中...' : '保存设置'}
         </button>
+      </div>
+
+      {/* Transfer Repository */}
+      <div style={{
+        marginTop: 16, paddingTop: 16, borderTop: '1px solid var(--mac-border)',
+        display: 'flex', flexDirection: 'column', gap: 12,
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          {Icon.external(16)}
+          <span style={{ fontSize: 14, fontWeight: 600 }}>转移仓库</span>
+        </div>
+
+        {!showTransfer ? (
+          <button
+            onClick={() => { setShowTransfer(true); setTransferMsg('') }}
+            style={{
+              padding: '6px 16px', borderRadius: 'var(--mac-radius)',
+              border: '1px solid var(--mac-red)', background: 'transparent',
+              color: 'var(--mac-red)', fontSize: 13, cursor: 'pointer',
+              fontWeight: 500, display: 'flex', alignItems: 'center', gap: 6,
+              alignSelf: 'flex-start',
+            }}
+          >
+            {Icon.external(14)} 转移仓库
+          </button>
+        ) : (
+          <div className="animate-fade-in" style={{
+            padding: 16, borderRadius: 'var(--mac-radius)',
+            background: 'var(--mac-bg)', border: '1px solid var(--mac-border)',
+            display: 'flex', flexDirection: 'column', gap: 12,
+          }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+              <label style={{ fontSize: 12, fontWeight: 500, color: 'var(--mac-text-secondary)' }}>新所有者用户名</label>
+              <input
+                type="text"
+                value={newOwner}
+                onChange={e => setNewOwner(e.target.value)}
+                placeholder="输入新所有者的 GitHub 用户名"
+                style={{
+                  padding: '6px 12px', borderRadius: 'var(--mac-radius)',
+                  border: '1px solid var(--mac-border)', background: 'var(--mac-surface)',
+                  color: 'var(--mac-text)', fontSize: 13, outline: 'none',
+                }}
+              />
+            </div>
+            <div style={{
+              fontSize: 12, padding: '8px 12px', borderRadius: 'var(--mac-radius)',
+              background: 'rgba(255,149,0,0.1)', color: 'var(--mac-orange)',
+              display: 'flex', alignItems: 'center', gap: 6,
+            }}>
+              <span>&#9888;&#65039;</span>
+              <span>转移仓库是不可逆操作，请确认新所有者用户名</span>
+            </div>
+            {transferMsg && (
+              <div style={{
+                fontSize: 12, padding: '6px 12px', borderRadius: 'var(--mac-radius)',
+                background: transferMsg.includes('失败') ? 'rgba(255,59,48,0.1)' : 'rgba(52,199,89,0.1)',
+                color: transferMsg.includes('失败') ? 'var(--mac-red)' : 'var(--mac-green)',
+              }}>
+                {transferMsg}
+              </div>
+            )}
+            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+              <button
+                className="btn-secondary"
+                onClick={() => { setShowTransfer(false); setNewOwner(''); setTransferMsg('') }}
+                style={{ fontSize: 12, padding: '5px 14px' }}
+              >
+                取消
+              </button>
+              <button
+                onClick={handleTransfer}
+                disabled={transferring || !newOwner.trim()}
+                style={{
+                  padding: '5px 14px', borderRadius: 'var(--mac-radius)',
+                  border: 'none', background: 'var(--mac-red)',
+                  color: 'white', fontSize: 12, cursor: 'pointer',
+                  fontWeight: 500, display: 'flex', alignItems: 'center', gap: 6,
+                  opacity: (transferring || !newOwner.trim()) ? 0.5 : 1,
+                }}
+              >
+                {transferring ? '转移中...' : '确认转移'}
+              </button>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   )

@@ -49,11 +49,20 @@ export default function RepoDetail({ repoName, projects, hfSpaces, onBack, onRef
   const [detail, setDetail] = useState(null)
   const [tab, setTab] = useState('readme')
   const [loading, setLoading] = useState({})
+  const [license, setLicense] = useState(null)
+  const [community, setCommunity] = useState(null)
 
   useEffect(() => {
     setDetail(null)
     setTab('readme')
-    api.get(`/api/github/repos/${repoName}/detail`).then(setDetail)
+    setLicense(null)
+    setCommunity(null)
+    api.get(`/api/github/repos/${repoName}/detail`).then(data => {
+      setDetail(data)
+      // Fetch license and community after repo data is loaded
+      api.get(`/api/github/repos/${repoName}/license`).then(lic => setLicense(lic)).catch(() => {})
+      api.get(`/api/github/repos/${repoName}/community/profile`).then(com => setCommunity(com)).catch(() => {})
+    })
   }, [repoName])
 
   if (!detail) return (
@@ -142,6 +151,8 @@ export default function RepoDetail({ repoName, projects, hfSpaces, onBack, onRef
               <h1 style={{ fontSize: 18, fontWeight: 700, letterSpacing: '-0.02em', margin: 0 }}>{detail.name}</h1>
               {detail.archived && <span style={{ fontSize: 9, padding: '2px 7px', borderRadius: 8, background: 'var(--mac-orange)', color: 'white', fontWeight: 500 }}>已归档</span>}
               {hfStatus && <span style={{ fontSize: 9, padding: '2px 7px', borderRadius: 8, background: hfStatus === 'RUNNING' ? 'rgba(52,199,89,0.12)' : 'var(--mac-gray)', color: hfStatus === 'RUNNING' ? 'var(--mac-green)' : 'var(--mac-text-secondary)', fontWeight: 500 }}>{hfStatus}</span>}
+              {license && license.name && <span style={{ fontSize: 9, padding: '2px 7px', borderRadius: 8, background: 'var(--mac-gray)', color: 'var(--mac-text-secondary)', fontWeight: 500 }}>&#128196; {license.name}</span>}
+              {community && community.health_percentage > 0 && <span style={{ fontSize: 9, padding: '2px 7px', borderRadius: 8, background: 'rgba(52,199,89,0.12)', color: 'var(--mac-green)', fontWeight: 500 }}>&#128154; 健康度 {community.health_percentage}%</span>}
             </div>
             <p style={{ fontSize: 13, color: 'var(--mac-text-secondary)', margin: '4px 0 0', lineHeight: 1.4, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
               {detail.description || '暂无描述'}
