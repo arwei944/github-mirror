@@ -166,10 +166,11 @@ export default function Dashboard({ githubRepos, onSelectRepo, onNavigate }) {
   const loadData = useCallback(async () => {
     setLoading(true)
     try {
-      const [act, star, trend] = await Promise.all([
-        api.get('/api/github/activity').catch(() => []),
+      const [act, star, trend, webhookEvents] = await Promise.all([
+        api.get('/api/github/activity/aggregated').catch(() => []),
         api.get('/api/github/user/starred?sort=updated&per_page=5').catch(() => []),
         api.get('/api/github/trending?since=daily').catch(() => []),
+        api.get('/api/webhooks/events?per_page=10').catch(() => []),
       ])
       setActivities(Array.isArray(act) ? act.slice(0, 15) : [])
       setStarred(Array.isArray(star) ? star : [])
