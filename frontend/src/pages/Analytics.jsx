@@ -6,7 +6,13 @@ const COLORS = ['#0066cc', '#3fb950', '#f85149', '#d29922', '#8b5cf6', '#f778ba'
 
 function ContributionHeatmap({ data }) {
   // data: array of { week, total } from commit_activity
-  if (!data || data.length === 0) return <div style={{ color: 'var(--mac-text-secondary)', fontSize: 12, textAlign: 'center', padding: 20 }}>暂无数据</div>
+  if (!data || data.length === 0) return (
+    <div style={{ textAlign: 'center', padding: '20px', color: 'var(--mac-text-secondary)' }}>
+      <div style={{ fontSize: 24, marginBottom: 8 }}>&#128202;</div>
+      <div style={{ fontSize: 12 }}>数据加载中或暂无记录</div>
+      <div style={{ fontSize: 11, marginTop: 4, opacity: 0.7 }}>GitHub Stats API 首次请求可能需要几分钟计算</div>
+    </div>
+  )
 
   const getColor = (count) => {
     if (count === 0) return 'var(--mac-border)'
@@ -43,7 +49,13 @@ function ContributionHeatmap({ data }) {
 
 function CodeFrequencyChart({ data }) {
   // data: [[week_timestamp, additions, deletions], ...]
-  if (!data || data.length === 0) return <div style={{ color: 'var(--mac-text-secondary)', fontSize: 12, textAlign: 'center', padding: 20 }}>暂无数据</div>
+  if (!data || data.length === 0) return (
+    <div style={{ textAlign: 'center', padding: '20px', color: 'var(--mac-text-secondary)' }}>
+      <div style={{ fontSize: 24, marginBottom: 8 }}>&#128202;</div>
+      <div style={{ fontSize: 12 }}>数据加载中或暂无记录</div>
+      <div style={{ fontSize: 11, marginTop: 4, opacity: 0.7 }}>GitHub Stats API 首次请求可能需要几分钟计算</div>
+    </div>
+  )
 
   const chartData = data.map(([week, additions, deletions]) => ({
     week: new Date(week * 1000).toLocaleDateString('zh-CN', { month: 'short', day: 'numeric' }),

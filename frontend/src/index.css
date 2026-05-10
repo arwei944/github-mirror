@@ -22,7 +22,7 @@
   --sidebar-width: 220px;
 }
 
-.dark {
+[data-theme="dark"] {
   --mac-bg: #1c1c1e;
   --mac-surface: rgba(44, 44, 46, 0.72);
   --mac-surface-hover: rgba(58, 58, 60, 0.9);

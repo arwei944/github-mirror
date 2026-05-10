@@ -392,7 +392,16 @@ export default function Discussions({ githubRepos }) {
         </div>
       ) : filteredDiscussions.length === 0 ? (
         <div style={{ ...glassCard, padding: 40, textAlign: 'center', color: 'var(--mac-text-secondary)', fontSize: 13 }}>
-          {searchQuery || selectedCategory !== 'all' ? '没有匹配的讨论' : '暂无讨论'}
+          {searchQuery || selectedCategory !== 'all' ? '没有匹配的讨论' : (
+            <div style={{ textAlign: 'center', padding: '40px 20px', color: 'var(--mac-text-secondary)' }}>
+              <div style={{ fontSize: 32, marginBottom: 12 }}>&#128172;</div>
+              <div style={{ fontSize: 14, fontWeight: 500, color: 'var(--mac-text)', marginBottom: 6 }}>还没有讨论</div>
+              <div style={{ fontSize: 12, marginBottom: 16 }}>成为第一个发起讨论的人，与团队分享想法</div>
+              <button onClick={() => setShowNewDiscussion(true)} style={{ background: 'var(--mac-accent)', color: 'white', border: 'none', borderRadius: 8, padding: '6px 16px', cursor: 'pointer', fontSize: 12 }}>
+                + 新建讨论
+              </button>
+            </div>
+          )}
         </div>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
