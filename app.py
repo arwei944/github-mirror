@@ -284,6 +284,8 @@ async def cache_middleware(request: Request, call_next):
     path = request.url.path
     method = request.method
     
+    logger.debug(f"[Cache Middleware] {method} {path}")
+    
     # 写操作清除相关缓存
     if method in ("POST", "PUT", "PATCH", "DELETE"):
         for prefix in list(CACHE_CONFIG.keys()):
@@ -316,7 +318,7 @@ async def cache_middleware(request: Request, call_next):
                         except (_json.JSONDecodeError, ValueError):
                             pass
                         from starlette.responses import Response as _R
-                        return _R(content=body, media_type=response.media_type, status_code=response.status_code, headers=dict(response.headers))
+                        return _R(content=body, media_type=response.media_type, status_code=response.status_code)
                     except Exception:
                         return response
                 return response
@@ -677,6 +679,12 @@ def enrich_event(event: dict) -> dict:
         enriched["detail"] = f"推送了 {commit_count} 个提交到 {ref}" if commit_count > 0 else f"推送到 {ref}"
         enriched["commit_count"] = commit_count
         enriched["ref"] = payload.get("ref", "")
+        # 提交消息列表（最多显示前 5 条）
+        enriched["commit_messages"] = [
+            {"sha": c.get("sha", "")[:7], "message": c.get("message", "").split("\n")[0]}
+            for c in (commits or [])[:5]
+        ]
+        enriched["head_sha"] = payload.get("head", "")[:7]
 
     elif event_type == "IssuesEvent":
         action = payload.get("action", "")
@@ -688,6 +696,9 @@ def enrich_event(event: dict) -> dict:
         enriched["issue_number"] = issue.get("number")
         enriched["issue_title"] = issue.get("title", "")
         enriched["url"] = issue.get("html_url", "")
+        enriched["issue_body"] = (issue.get("body", "") or "")[:200]
+        enriched["issue_state"] = issue.get("state", "")
+        enriched["issue_labels"] = [l.get("name", "") for l in (issue.get("labels", []) or [])[:5]]
 
     elif event_type == "IssueCommentEvent":
         action = payload.get("action", "")
@@ -712,6 +723,11 @@ def enrich_event(event: dict) -> dict:
         enriched["pr_title"] = pr.get("title", "")
         enriched["merged"] = pr.get("merged", False)
         enriched["url"] = pr.get("html_url", "")
+        enriched["pr_body"] = (pr.get("body", "") or "")[:200]
+        enriched["pr_state"] = pr.get("state", "")
+        enriched["pr_additions"] = pr.get("additions", 0)
+        enriched["pr_deletions"] = pr.get("deletions", 0)
+        enriched["pr_changed_files"] = pr.get("changed_files", 0)
 
     elif event_type == "PullRequestReviewEvent":
         action = payload.get("action", "")
@@ -738,26 +754,30 @@ def enrich_event(event: dict) -> dict:
         enriched["tag_name"] = release.get("tag_name", "")
         enriched["release_name"] = release.get("name", "")
         enriched["url"] = release.get("html_url", "")
+        enriched["release_body"] = (release.get("body", "") or "")[:200]
+        enriched["release_prerelease"] = release.get("prerelease", False)
+        enriched["release_draft"] = release.get("draft", False)
 
     elif event_type == "CreateEvent":
         ref_type = payload.get("ref_type", "")
-        ref = payload.get("ref", "")
-        enriched["action"] = "create"
+        ref_name = (payload.get("ref", "") or "").replace("refs/heads/", "")
+        enriched["action"] = "created"
         type_map = {"branch": "分支", "tag": "标签", "repository": "仓库"}
         type_label = type_map.get(ref_type, ref_type)
-        enriched["detail"] = f"创建了{type_label}: {ref}"
+        enriched["detail"] = f"创建了{type_label}: {ref_name}" if ref_name else f"创建了{type_label}"
         enriched["ref_type"] = ref_type
-        enriched["ref"] = ref
+        enriched["ref_name"] = ref_name
+        enriched["master_branch"] = payload.get("master_branch", "")
 
     elif event_type == "DeleteEvent":
         ref_type = payload.get("ref_type", "")
-        ref = payload.get("ref", "")
-        enriched["action"] = "delete"
+        ref_name = (payload.get("ref", "") or "").replace("refs/heads/", "")
+        enriched["action"] = "deleted"
         type_map = {"branch": "分支", "tag": "标签"}
         type_label = type_map.get(ref_type, ref_type)
-        enriched["detail"] = f"删除了{type_label}: {ref}"
+        enriched["detail"] = f"删除了{type_label}: {ref_name}" if ref_name else f"删除了{type_label}"
         enriched["ref_type"] = ref_type
-        enriched["ref"] = ref
+        enriched["ref_name"] = ref_name
 
     elif event_type == "WatchEvent":
         enriched["action"] = "starred"
@@ -1023,6 +1043,34 @@ async def github_webhook(request: Request):
             _webhook_events.insert(0, event)
             if len(_webhook_events) > _WEBHOOK_MAX_EVENTS:
                 _webhook_events.pop()
+
+        # ──────────────────────────────────────────────
+        # 实时广播到前端 (v6.3.0)
+        # ──────────────────────────────────────────────
+        event_data = {
+            "type": event_type,
+            "repo": repo_full_name,
+            "branch": branch,
+            "sender": payload.get("sender", {}).get("login", ""),
+            "action": payload.get("action", ""),
+            "received_at": event["received_at"],
+        }
+        event_queue.append(event_data)
+        try:
+            await ws_manager.broadcast({"type": "event", "data": event_data})
+        except Exception:
+            pass
+
+        # Webhook 触发后主动失效相关缓存，确保下次拉取最新数据
+        try:
+            api_cache.invalidate("GET:/api/github/repos")
+            api_cache.invalidate("GET:/api/github/activity")
+            api_cache.invalidate("GET:/api/github/activity/aggregated")
+            if repo_full_name:
+                api_cache.invalidate(f"GET:/api/github/repos/{repo_full_name.split('/')[-1]}")
+                api_cache.invalidate(f"GET:/api/github/repos/{repo_full_name.split('/')[-1]}/detail")
+        except Exception:
+            pass
         
         # ──────────────────────────────────────────────
         # 自动部署逻辑 (v6.0.0)
@@ -2250,7 +2298,26 @@ async def list_commits(repo_name: str, sha: str = Query("", description="分支�
         raise HTTPException(status_code=status, detail=f"获取提交历史失败: {data}")
     if not isinstance(data, list):
         return []
-    return [{"sha": c.get("sha", "")[:7], "sha_full": c.get("sha", ""), "message": c.get("commit", {}).get("message", "").split("\n")[0], "author": {"name": c.get("commit", {}).get("author", {}).get("name", ""), "date": c.get("commit", {}).get("author", {}).get("date", ""), "avatar_url": c.get("author", {}).get("avatar_url", "")} if c.get("author") else {}, "html_url": c.get("html_url", "")} for c in data]
+    # 批量获取前 15 个 commit 的 stats（GitHub 列表 API 不返回 stats）
+    import concurrent.futures
+    def fetch_stats(c):
+        s, d = github_api_get(f"/repos/{GITHUB_USER}/{repo_name}/commits/{c.get('sha', '')}")
+        if s == 200 and isinstance(d, dict):
+            return c.get("sha", ""), d.get("stats", {})
+        return c.get("sha", ""), {}
+    
+    stats_map = {}
+    with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
+        futures = {executor.submit(fetch_stats, c): c for c in data[:15]}
+        for f in concurrent.futures.as_completed(futures):
+            try:
+                sha, st = f.result()
+                if st:
+                    stats_map[sha] = st
+            except Exception:
+                pass
+    
+    return [{"sha": c.get("sha", "")[:7], "sha_full": c.get("sha", ""), "message": c.get("commit", {}).get("message", "").split("\n")[0], "author": {"name": c.get("commit", {}).get("author", {}).get("name", ""), "date": c.get("commit", {}).get("author", {}).get("date", ""), "avatar_url": c.get("author", {}).get("avatar_url", "")} if c.get("author") else {}, "stats": stats_map.get(c.get("sha", ""), {}), "html_url": c.get("html_url", "")} for c in data]
 
 
 @app.get("/api/github/repos/{repo_name}/commits/{ref}")
@@ -2437,17 +2504,20 @@ async def create_webhook(repo_name: str, request: Request):
     if not GITHUB_TOKEN:
         raise HTTPException(status_code=500, detail="未配置 GITHUB_TOKEN")
     body = await request.json()
+    # 支持两种格式：body.url 或 body.config.url
+    webhook_url = body.get("url") or body.get("config", {}).get("url", "")
+    webhook_secret = body.get("secret") or body.get("config", {}).get("secret", "")
     data = {
         "name": "web",
         "config": {
-            "url": body.get("url", ""),
-            "content_type": body.get("content_type", "json"),
+            "url": webhook_url,
+            "content_type": body.get("content_type") or body.get("config", {}).get("content_type", "json"),
         },
         "events": body.get("events", ["push"]),
         "active": body.get("active", True),
     }
-    if body.get("secret"):
-        data["config"]["secret"] = body["secret"]
+    if webhook_secret:
+        data["config"]["secret"] = webhook_secret
     status, result = github_api_post(f"/repos/{GITHUB_USER}/{repo_name}/hooks", data=data)
     if status == 201:
         return result

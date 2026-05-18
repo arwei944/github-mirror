@@ -185,35 +185,83 @@ function CommitTimeline({ repoName, branch }) {
   if (loading) return <div style={{ padding: 20, textAlign: 'center', color: 'var(--mac-text-secondary)', fontSize: 12 }}>加载中...</div>
 
   return (
-    <div>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
       {commits.map((commit, i) => {
-        // 后端返回扁平结构: message, author.name, author.date, author.avatar_url, sha
         const message = commit.message || commit.commit?.message || 'No message'
+        const firstLine = message.split('\n')[0]
         const authorName = commit.author?.name || commit.commit?.author?.name || 'Unknown'
         const authorDate = commit.author?.date || commit.commit?.author?.date
         const avatarUrl = commit.author?.avatar_url || commit.committer?.avatar_url
-        const sha = commit.sha || commit.sha_full?.slice(0, 7) || ''
-        
+        const sha = commit.sha || commit.sha_full || ''
+        const shortSha = sha.slice(0, 7)
+        // 提交统计
+        const stats = commit.stats || {}
+
         return (
-          <div key={i} style={{ display: 'flex', gap: 12, padding: '10px 0', borderBottom: '1px solid var(--mac-border)' }}>
-            <img src={avatarUrl} alt="" style={{ width: 32, height: 32, borderRadius: '50%', flexShrink: 0, background: 'var(--mac-gray)' }} />
+          <div key={i} style={{
+            display: 'flex', alignItems: 'center', gap: 12, padding: '12px 16px',
+            borderRadius: 10, background: i % 2 === 0 ? 'transparent' : 'var(--mac-surface)',
+            transition: 'background 0.15s',
+            cursor: 'default',
+          }}
+            onMouseEnter={e => e.currentTarget.style.background = 'var(--mac-surface-hover)'}
+            onMouseLeave={e => e.currentTarget.style.background = i % 2 === 0 ? 'transparent' : 'var(--mac-surface)'}
+          >
+            {/* 头像 */}
+            <img
+              src={avatarUrl}
+              alt=""
+              onError={e => { e.target.style.display = 'none' }}
+              style={{
+                width: 36, height: 36, borderRadius: '50%', flexShrink: 0,
+                background: 'var(--mac-gray)', border: '2px solid var(--mac-border)',
+              }}
+            />
+            {/* 提交信息 */}
             <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ fontSize: 13, fontWeight: 500, color: 'var(--mac-text)', marginBottom: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                {message.split('\n')[0]}
+              <div style={{
+                fontSize: 13, fontWeight: 500, color: 'var(--mac-text)',
+                overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                marginBottom: 3,
+              }}>
+                {firstLine}
               </div>
-              <div style={{ fontSize: 11, color: 'var(--mac-text-secondary)' }}>
-                <span style={{ color: 'var(--mac-accent)' }}>{authorName}</span>
-                {' · '}{timeAgo(authorDate)}
+              <div style={{ fontSize: 11, color: 'var(--mac-text-secondary)', display: 'flex', alignItems: 'center', gap: 6 }}>
+                <span style={{ fontWeight: 600, color: 'var(--mac-accent)' }}>{authorName}</span>
+                <span>·</span>
+                <span>{timeAgo(authorDate)}</span>
+                {stats.additions !== undefined && (
+                  <>
+                    <span>·</span>
+                    <span style={{ color: '#34c759' }}>+{stats.additions}</span>
+                    <span style={{ color: '#ff3b30' }}>-{stats.deletions}</span>
+                  </>
+                )}
               </div>
             </div>
-            <code style={{ fontSize: 10, color: 'var(--mac-text-secondary)', background: 'var(--mac-bg)', padding: '2px 8px', borderRadius: 6, flexShrink: 0 }}>
-              {sha.slice(0, 7)}
+            {/* SHA 复制按钮 */}
+            <code
+              onClick={() => navigator.clipboard.writeText(sha)}
+              title="点击复制完整 SHA"
+              style={{
+                fontSize: 11, fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+                color: 'var(--mac-accent)', background: 'var(--mac-accent-opacity, rgba(0,122,255,0.08))',
+                padding: '4px 10px', borderRadius: 6, flexShrink: 0,
+                cursor: 'pointer', transition: 'background 0.15s',
+                border: '1px solid rgba(0,122,255,0.15)',
+              }}
+              onMouseEnter={e => e.currentTarget.style.background = 'rgba(0,122,255,0.15)'}
+              onMouseLeave={e => e.currentTarget.style.background = 'var(--mac-accent-opacity, rgba(0,122,255,0.08))'}
+            >
+              {shortSha}
             </code>
           </div>
         )
       })}
       {commits.length === 0 && (
-        <div style={{ textAlign: 'center', padding: 20, color: 'var(--mac-text-secondary)', fontSize: 12 }}>暂无提交记录</div>
+        <div style={{ textAlign: 'center', padding: 40, color: 'var(--mac-text-secondary)', fontSize: 13 }}>
+          暂无提交记录
+        </div>
       )}
     </div>
   )

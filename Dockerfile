@@ -29,7 +29,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # 复制应用代码
 COPY app.py .
-COPY --from=frontend-builder /build/../static ./static
+COPY --from=frontend-builder /static ./static
 
 # 创建数据目录并设置权限
 RUN mkdir -p /app/data && chown -R appuser:appuser /app

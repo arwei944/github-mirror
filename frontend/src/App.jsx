@@ -361,16 +361,25 @@ export default function App() {
               sessionStorage.setItem('github-mirror-unread', String(next))
               return next
             })
+            // Webhook 事件触发数据刷新（实时同步）
+            if (document.visibilityState === 'visible') {
+              loadAll()
+            }
           }
         } catch (e) {}
       }
       eventSource.onerror = () => {
-        // SSE not available, silently fail
+        // SSE 断开后自动重连（延迟 5 秒）
         if (eventSource) eventSource.close()
+        setTimeout(() => {
+          if (!eventSource || eventSource.readyState === EventSource.CLOSED) {
+            eventSource = new EventSource('/api/events/stream')
+          }
+        }, 5000)
       }
     } catch (e) {}
     return () => { if (eventSource) eventSource.close() }
-  }, [])
+  }, [loadAll])
 
   const renderContent = () => {
     // 详情页（不受 Tab 影响）

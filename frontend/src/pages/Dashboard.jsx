@@ -137,6 +137,23 @@ function getEventText(event) {
   }
 }
 
+function getEventColor(type) {
+  const colors = {
+    PushEvent: '#34c759',
+    PullRequestEvent: '#007aff',
+    IssuesEvent: '#ff9500',
+    IssueCommentEvent: '#5856d6',
+    ReleaseEvent: '#ff2d55',
+    StarEvent: '#ffcc00',
+    ForkEvent: '#5ac8fa',
+    WatchEvent: '#8e8e93',
+    CreateEvent: '#30d158',
+    DeleteEvent: '#ff3b30',
+    McpToolCallEvent: '#af52de',
+  }
+  return colors[type] || '#8e8e93'
+}
+
 const cardStyle = {
   background: 'var(--mac-surface)',
   backdropFilter: 'var(--mac-blur)',
@@ -280,43 +297,124 @@ export default function Dashboard({ githubRepos, onSelectRepo, onNavigate }) {
             <div style={{ display: 'flex', flexDirection: 'column' }}>
               {activities.map((event, i) => (
                 <div key={i} style={{
-                  display: 'flex', alignItems: 'center', gap: 10, padding: '8px 4px',
+                  padding: '10px 4px',
                   borderBottom: i < activities.length - 1 ? '1px solid var(--mac-border)' : 'none',
-                  cursor: event.repo?.name ? 'pointer' : 'default',
+                  cursor: (event.repo?.name || event.full_repo_name) ? 'pointer' : 'default',
                 }}
                   onMouseEnter={e => e.currentTarget.style.background = 'var(--mac-surface-hover)'}
                   onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
-                  onClick={() => event.repo?.name && onSelectRepo?.(event.repo.name.split('/')[1] || event.repo.name)}
+                  onClick={() => {
+                    const rn = event.full_repo_name || (event.repo?.name || '').split('/')[1]
+                    if (rn) onSelectRepo?.(rn)
+                  }}
                 >
-                  <span style={{ flexShrink: 0, display: 'inline-flex' }}>{getEventIcon(event.type)}</span>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontSize: 12, color: 'var(--mac-text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'flex', alignItems: 'center', gap: 4 }}>
+                  {/* 第一行：图标 + 类型 + 仓库名 + 时间 */}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <span style={{ flexShrink: 0, display: 'inline-flex' }}>{getEventIcon(event.type)}</span>
+                    <span style={{
+                      fontSize: 10, fontWeight: 600, padding: '1px 6px', borderRadius: 4,
+                      background: `${getEventColor(event.type)}15`, color: getEventColor(event.type),
+                      flexShrink: 0,
+                    }}>{event.type_label || event.type?.replace('Event', '')}</span>
+                    <span style={{
+                      fontSize: 12, color: 'var(--mac-text)', flex: 1, minWidth: 0,
+                      overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                    }}>
                       {getEventText(event)}
-                      {(event.repo?.name || event.full_repo_name) && (
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation()
-                            const repoFullName = event.full_repo_name || event.repo?.name
-                            navigator.clipboard.writeText(repoFullName).then(() => {
-                              e.target.textContent = '✓'
-                              setTimeout(() => { e.target.textContent = '📋' }, 1500)
-                            })
-                          }}
-                          title="复制项目名"
-                          style={{
-                            background: 'none', border: 'none', cursor: 'pointer',
-                            padding: '0 2px', fontSize: 10, opacity: 0.4,
-                            borderRadius: 4, flexShrink: 0,
-                          }}
-                          onMouseEnter={e => e.currentTarget.style.opacity = '1'}
-                          onMouseLeave={e => e.currentTarget.style.opacity = '0.4'}
-                        >📋</button>
+                    </span>
+                    {(event.repo?.name || event.full_repo_name) && (
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          const repoFullName = event.full_repo_name || event.repo?.name
+                          navigator.clipboard.writeText(repoFullName).then(() => {
+                            e.target.textContent = '✓'
+                            setTimeout(() => { e.target.textContent = '📋' }, 1500)
+                          })
+                        }}
+                        title="复制项目名"
+                        style={{
+                          background: 'none', border: 'none', cursor: 'pointer',
+                          padding: '0 2px', fontSize: 10, opacity: 0.4,
+                          borderRadius: 4, flexShrink: 0,
+                        }}
+                        onMouseEnter={e => e.currentTarget.style.opacity = '1'}
+                        onMouseLeave={e => e.currentTarget.style.opacity = '0.4'}
+                      >📋</button>
+                    )}
+                    <span style={{ fontSize: 10, color: 'var(--mac-text-secondary)', flexShrink: 0 }}>
+                      {timeAgo(event.created_at)}
+                    </span>
+                  </div>
+
+                  {/* 第二行：详细信息（条件渲染） */}
+                  {event.type === 'PushEvent' && event.commit_messages?.length > 0 && (
+                    <div style={{ marginTop: 6, marginLeft: 28, fontSize: 11, color: 'var(--mac-text-secondary)' }}>
+                      {event.commit_messages.map((c, j) => (
+                        <div key={j} style={{
+                          padding: '2px 0', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                          display: 'flex', alignItems: 'center', gap: 4,
+                        }}>
+                          <code style={{
+                            fontSize: 10, color: 'var(--mac-accent)', background: 'var(--mac-bg)',
+                            padding: '0 4px', borderRadius: 3, flexShrink: 0,
+                          }}>{c.sha}</code>
+                          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            {c.message}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {event.type === 'PullRequestEvent' && event.pr_body && (
+                    <div style={{
+                      marginTop: 6, marginLeft: 28, fontSize: 11, color: 'var(--mac-text-secondary)',
+                      overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                      maxWidth: '100%',
+                    }}>
+                      {event.pr_body}
+                      {event.pr_changed_files > 0 && (
+                        <span style={{ marginLeft: 8, fontSize: 10 }}>
+                          <span style={{ color: '#34c759' }}>+{event.pr_additions}</span>
+                          {' / '}
+                          <span style={{ color: '#ff3b30' }}>-{event.pr_deletions}</span>
+                          {' '}
+                          {event.pr_changed_files} 文件
+                        </span>
                       )}
                     </div>
-                  </div>
-                  <span style={{ fontSize: 10, color: 'var(--mac-text-secondary)', flexShrink: 0 }}>
-                    {timeAgo(event.created_at)}
-                  </span>
+                  )}
+
+                  {event.type === 'IssuesEvent' && event.issue_labels?.length > 0 && (
+                    <div style={{ marginTop: 6, marginLeft: 28, display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+                      {event.issue_labels.map((label, j) => (
+                        <span key={j} style={{
+                          fontSize: 10, padding: '1px 6px', borderRadius: 10,
+                          background: 'rgba(0,122,255,0.1)', color: '#007aff',
+                        }}>{label}</span>
+                      ))}
+                    </div>
+                  )}
+
+                  {event.type === 'ReleaseEvent' && event.release_body && (
+                    <div style={{
+                      marginTop: 6, marginLeft: 28, fontSize: 11, color: 'var(--mac-text-secondary)',
+                      overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                    }}>
+                      {event.release_body}
+                    </div>
+                  )}
+
+                  {event.type === 'IssueCommentEvent' && event.comment_body && (
+                    <div style={{
+                      marginTop: 6, marginLeft: 28, fontSize: 11, color: 'var(--mac-text-secondary)',
+                      padding: 6, borderRadius: 6, background: 'var(--mac-bg)',
+                      overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                    }}>
+                      💬 {event.comment_body}
+                    </div>
+                  )}
                 </div>
               ))}
             </div>

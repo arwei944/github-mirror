@@ -1,5 +1,7 @@
 const BASE = ''
 const pendingRequests = new Map()
+// ETag 缓存：URL -> ETag value
+const etagCache = new Map()
 
 function getCacheKey(method, url, body) {
   return `${method}:${url}:${body || ''}`
@@ -8,7 +10,28 @@ function getCacheKey(method, url, body) {
 async function requestWithRetry(url, options, retries = 3) {
   for (let i = 0; i <= retries; i++) {
     try {
+      // GET 请求自动附带 If-None-Match（ETag 条件请求）
+      if (!options.method || options.method === 'GET') {
+        const etag = etagCache.get(url)
+        if (etag) {
+          options.headers = options.headers || {}
+          options.headers['If-None-Match'] = etag
+        }
+      }
+
       const response = await fetch(BASE + url, options)
+
+      // 304 Not Modified：数据未变更，返回 null
+      if (response.status === 304) {
+        return null
+      }
+
+      // 保存 ETag 供下次请求使用
+      const newEtag = response.headers.get('etag')
+      if (newEtag && (!options.method || options.method === 'GET')) {
+        etagCache.set(url, newEtag)
+      }
+
       if (response.ok) {
         const contentType = response.headers.get('content-type') || ''
         if (contentType.includes('application/json')) {
