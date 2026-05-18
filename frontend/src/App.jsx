@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, Suspense, lazy } from 'react'
 import api from './api'
+import { APP_VERSION } from './version'
 import { useToast } from './components/Toast'
 import ErrorBoundary from './components/ErrorBoundary'
 import CommandPalette from './components/CommandPalette'
@@ -213,7 +214,19 @@ export default function App() {
   }, [])
 
   useEffect(() => { loadAll() }, [loadAll])
-  useEffect(() => { const t = setInterval(loadAll, 15000); return () => clearInterval(t) }, [loadAll])
+  // 智能轮询：60秒一次，页面可见时才刷新
+  useEffect(() => {
+    const t = setInterval(() => {
+      if (document.visibilityState === 'visible') loadAll()
+    }, 60000)
+    return () => clearInterval(t)
+  }, [loadAll])
+  // 页面从隐藏切换到可见时立即刷新
+  useEffect(() => {
+    const handler = () => { if (document.visibilityState === 'visible') loadAll() }
+    document.addEventListener('visibilitychange', handler)
+    return () => document.removeEventListener('visibilitychange', handler)
+  }, [loadAll])
 
   const stats = {
     total: githubRepos.length,
@@ -225,7 +238,7 @@ export default function App() {
 
   const handleSelectRepo = (repoName) => {
     setSelectedRepo(repoName)
-    setCurrentPage('detail')
+    setCurrentPage('repo-detail')
     setSidebarOpen(false)
   }
 
@@ -365,7 +378,15 @@ export default function App() {
       return (
         <ErrorBoundary>
           <Suspense fallback={<SkeletonLoader />}>
-            <RepoDetail repo={selectedRepo} onNavigate={navigateTo} />
+            <RepoDetail
+              repoName={selectedRepo}
+              githubRepos={githubRepos}
+              projects={projects}
+              hfSpaces={hfSpaces}
+              onBack={() => navigateTo('repos')}
+              onRefresh={loadAll}
+              onNavigate={navigateTo}
+            />
           </Suspense>
         </ErrorBoundary>
       )
@@ -491,7 +512,7 @@ export default function App() {
       <div className="mobile-header">
         <HamburgerMenu isOpen={sidebarOpen} onClick={() => setSidebarOpen(prev => !prev)} />
         <span style={{ fontSize: 15, fontWeight: 600, letterSpacing: '-0.02em' }}>GitHub Mirror</span>
-        <span style={{ fontSize: 9, padding: '1px 6px', borderRadius: 8, background: 'var(--mac-accent)', color: 'white', fontWeight: 500 }}>v6.0.0</span>
+        <span style={{ fontSize: 9, padding: '1px 6px', borderRadius: 8, background: 'var(--mac-accent)', color: 'white', fontWeight: 500 }}>{APP_VERSION}</span>
       </div>
 
       {/* Mobile sidebar overlay */}
@@ -506,7 +527,7 @@ export default function App() {
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <span style={{ color: 'var(--mac-text)' }}>{Icon.github(18)}</span>
             <span className="sidebar-title" style={{ fontSize: 15, fontWeight: 600, letterSpacing: '-0.02em' }}>GitHub Mirror</span>
-            <span className="sidebar-version" style={{ fontSize: 9, padding: '1px 6px', borderRadius: 8, background: 'var(--mac-accent)', color: 'white', fontWeight: 500 }}>v6.0.0</span>
+            <span className="sidebar-version" style={{ fontSize: 9, padding: '1px 6px', borderRadius: 8, background: 'var(--mac-accent)', color: 'white', fontWeight: 500 }}>{APP_VERSION}</span>
           </div>
           {/* Theme toggle */}
           <button

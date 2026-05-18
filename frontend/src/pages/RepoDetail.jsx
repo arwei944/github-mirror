@@ -279,6 +279,8 @@ export default function RepoDetail({ repoName, projects, hfSpaces, onBack, onRef
   const [readme, setReadme] = useState('')
   const [branches, setBranches] = useState([])
   const [selectedBranch, setSelectedBranch] = useState('')
+  const [syncing, setSyncing] = useState(false)
+  const [syncResult, setSyncResult] = useState(null)
 
   useEffect(() => {
     setDetail(null)
@@ -405,6 +407,36 @@ export default function RepoDetail({ repoName, projects, hfSpaces, onBack, onRef
 
         {/* Action buttons */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
+          <button
+            className="btn-primary"
+            onClick={async () => {
+              setSyncing(true)
+              try {
+                const result = await api.post(`/api/github/repos/${repoName}/sync`)
+                setSyncResult(result)
+              } catch (err) {
+                setSyncResult({ status: 'error', message: err.message })
+              } finally {
+                setSyncing(false)
+              }
+            }}
+            disabled={syncing}
+            style={{ display: 'flex', alignItems: 'center', gap: 3, fontSize: 11, padding: '4px 10px' }}
+          >
+            {syncing ? '同步中...' : '📥 同步文件'}
+          </button>
+          {syncResult && (
+            <div style={{
+              padding: '4px 10px', borderRadius: 8,
+              background: syncResult.status === 'ok' ? 'rgba(52,199,89,0.1)' : 'rgba(255,59,48,0.1)',
+              fontSize: 11, color: syncResult.status === 'ok' ? 'var(--mac-green)' : 'var(--mac-red)',
+            }}>
+              {syncResult.status === 'ok'
+                ? `✓ ${syncResult.synced_files}/${syncResult.total_files}`
+                : `✗ ${syncResult.message}`
+              }
+            </div>
+          )}
           <button
             onClick={handleStar}
             className="btn-secondary"

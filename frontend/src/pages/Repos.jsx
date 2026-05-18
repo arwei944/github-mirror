@@ -82,6 +82,23 @@ function RepoCard({ repo, isDeployed, config, lastDeploy, hfStatus, onSelect, on
           <span style={{ fontSize: 14, fontWeight: 600, letterSpacing: '-0.01em', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
             {repo.name}
           </span>
+          <button
+            onClick={(e) => {
+              e.stopPropagation()
+              navigator.clipboard.writeText(repo.full_name || repo.name).then(() => {
+                e.target.textContent = '✓'
+                setTimeout(() => { e.target.textContent = '📋' }, 1500)
+              })
+            }}
+            title="复制项目名"
+            style={{
+              background: 'none', border: 'none', cursor: 'pointer',
+              padding: '2px 4px', fontSize: 11, opacity: 0.5,
+              borderRadius: 4,
+            }}
+            onMouseEnter={e => e.currentTarget.style.opacity = '1'}
+            onMouseLeave={e => e.currentTarget.style.opacity = '0.5'}
+          >📋</button>
           {repo.visibility === 'private' && <span style={{ color: 'var(--mac-text-secondary)', flexShrink: 0 }}>{Icon.lock(10)}</span>}
         </div>
         {hfStatus && (

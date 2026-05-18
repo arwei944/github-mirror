@@ -192,9 +192,19 @@ export default function Dashboard({ githubRepos, onSelectRepo, onNavigate }) {
     } finally {
       setLoading(false)
     }
-  }, [repos])
+  }, [])
 
-  useEffect(() => { loadData() }, [loadData])
+  useEffect(() => { loadData() }, [])
+
+  // 当 repos 数据到达时更新统计
+  useEffect(() => {
+    if (repos.length > 0) {
+      const totalStars = repos.reduce((s, r) => s + (r.stargazers_count || 0), 0)
+      const totalForks = repos.reduce((s, r) => s + (r.forks_count || 0), 0)
+      const totalIssues = repos.reduce((s, r) => s + (r.open_issues_count || 0), 0)
+      setStats({ repos: repos.length, stars: totalStars, issues: totalIssues, forks: totalForks })
+    }
+  }, [repos.length])
 
   const statCards = [
     { label: '仓库', value: stats.repos, icon: Icon.repo(18, '#0066cc'), color: '#0066cc' },
@@ -272,8 +282,28 @@ export default function Dashboard({ githubRepos, onSelectRepo, onNavigate }) {
                 >
                   <span style={{ flexShrink: 0, display: 'inline-flex' }}>{getEventIcon(event.type)}</span>
                   <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontSize: 12, color: 'var(--mac-text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    <div style={{ fontSize: 12, color: 'var(--mac-text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'flex', alignItems: 'center', gap: 4 }}>
                       {getEventText(event)}
+                      {(event.repo?.name || event.full_repo_name) && (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            const repoFullName = event.full_repo_name || event.repo?.name
+                            navigator.clipboard.writeText(repoFullName).then(() => {
+                              e.target.textContent = '✓'
+                              setTimeout(() => { e.target.textContent = '📋' }, 1500)
+                            })
+                          }}
+                          title="复制项目名"
+                          style={{
+                            background: 'none', border: 'none', cursor: 'pointer',
+                            padding: '0 2px', fontSize: 10, opacity: 0.4,
+                            borderRadius: 4, flexShrink: 0,
+                          }}
+                          onMouseEnter={e => e.currentTarget.style.opacity = '1'}
+                          onMouseLeave={e => e.currentTarget.style.opacity = '0.4'}
+                        >📋</button>
+                      )}
                     </div>
                   </div>
                   <span style={{ fontSize: 10, color: 'var(--mac-text-secondary)', flexShrink: 0 }}>

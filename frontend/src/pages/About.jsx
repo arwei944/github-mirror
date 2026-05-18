@@ -1,20 +1,36 @@
 import { useState } from 'react'
 import { Icon } from '../App'
+import { APP_VERSION } from '../version'
 
 const versions = [
   {
-    version: 'v6.0.0',
+    version: 'v6.2.0',
     date: '2026-05-18',
     changes: [
-      'MCP 服务端（SSE 传输协议，30 个工具）',
-      'Shell 命令执行工具（安全限制 + 超时控制）',
-      'HTTP 代理工具（URL 黑名单防护）',
-      'MCP 服务展示页面（工具列表 + 调用历史）',
-      'MCP 工具调用活动流集成',
-      '侧边栏分组 Tab 页导航重构',
-      '关于页面（项目介绍 + 版本变更）',
-      '环境变量管理页面',
-      '活动流自动刷新修复',
+      '仪表盘智能刷新（60秒轮询 + 页面可见性检测）',
+      '版本号统一管理（version.js 单一来源）',
+      '一键复制项目名（📋 按钮）',
+      '仓库文件实时同步（POST /api/github/repos/{name}/sync）',
+      '修复项目详情页空白（page 名称 + props 匹配）',
+      'Dashboard 统计卡片数据修复',
+    ],
+  },
+  {
+    version: 'v6.1.0',
+    date: '2026-05-18',
+    changes: [
+      'API Key 认证中间件（X-API-Key）',
+      'CORS 跨域配置',
+      'IP 速率限制（120 req/min）',
+      'Shell 白名单 + 黑名单双重安全',
+      'SSRF DNS Rebinding 防护',
+      'Webhook HMAC-SHA256 签名验证',
+      'Token 不再嵌入 git clone URL',
+      'logging 替换 print',
+      '全局状态 asyncio.Lock 保护',
+      'TTLCache 容量限制 + LRU 淘汰',
+      '通用 UI 组件库（Modal/Loading/EmptyState 等）',
+      'Docker 多阶段构建 + CI/CD',
     ],
   },
   {
@@ -208,7 +224,7 @@ export default function About() {
                     fontSize: 11, padding: '2px 8px', borderRadius: 8,
                     background: 'var(--mac-accent)', color: 'white', fontWeight: 500,
                   }}>
-                    v6.0.0
+                    {APP_VERSION}
                   </span>
                 </div>
               </div>

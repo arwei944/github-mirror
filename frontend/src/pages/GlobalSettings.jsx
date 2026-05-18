@@ -1,9 +1,13 @@
 import { useState, useEffect } from 'react'
 import { Icon } from '../App'
 import api from '../api'
+import { APP_VERSION } from '../version'
 
 // 版本历史
 const VERSION_HISTORY = [
+  { version: APP_VERSION, date: '2026-05-18', changes: ['仪表盘智能轮询（60秒 + 页面可见性检测）', '版本号统一管理（version.js）', '一键复制项目名', '仓库文件同步功能', '修复项目详情页空白问题'] },
+  { version: 'v6.0.0', date: '2026-05-18', changes: ['MCP 服务端（SSE 传输协议，30 个工具）', 'Shell 命令执行工具（安全限制 + 超时控制）', 'HTTP 代理工具（URL 黑名单防护）', 'MCP 服务展示页面（工具列表 + 调用历史）', 'MCP 工具调用活动流集成', '侧边栏分组 Tab 页导航重构', '关于页面（项目介绍 + 版本变更）', '环境变量管理页面', '活动流自动刷新修复'] },
+  { version: 'v5.5.0', date: '2026-05-18', changes: ['新增 MCP 服务端（SSE 传输协议）', '新增 Shell 命令执行工具', '新增 HTTP 代理工具', '侧边栏分组优化', '新增关于页面'] },
   { version: 'v5.4.5', date: '2026-05-10', changes: ['多仓库活动聚合 API', 'HF Space 部署状态 API', 'Webhook 接收器', 'GitHub/HF Webhook 支持'] },
   { version: 'v5.4.4', date: '2026-05-10', changes: ['修复最近活动显示问题', '修复提交记录显示问题'] },
   { version: 'v5.4.3', date: '2026-05-10', changes: ['修复 API 返回值顺序错误', '修复 params 参数错误'] },
@@ -611,7 +615,7 @@ export default function GlobalSettings() {
         </span>
         <div style={{ flex: 1 }} />
         <span style={{ fontSize: 11, color: 'var(--mac-text-secondary)' }}>
-          v5.4.5
+          {APP_VERSION}
         </span>
       </div>
 

@@ -37,7 +37,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 
-__version__ = "6.1.0"
+__version__ = "6.2.0"
 
 app = FastAPI(
     version=__version__,
@@ -573,6 +573,50 @@ async def fork_repo(repo_name: str):
     if status == 202:
         return data
     raise HTTPException(status_code=status, detail=f"Fork 操作失败: {data}")
+
+
+@app.post("/api/github/repos/{repo_name}/sync")
+async def sync_repo_files(repo_name: str):
+    """同步仓库文件到本地"""
+    if not GITHUB_TOKEN:
+        raise HTTPException(status_code=401, detail="未配置 GITHUB_TOKEN")
+
+    full_name = f"{GITHUB_USER}/{repo_name}" if "/" not in repo_name else repo_name
+
+    # 获取仓库文件树
+    status, tree_data = github_api_get(f"/repos/{full_name}/git/trees/main?recursive=1")
+    if status != 200:
+        raise HTTPException(status_code=status, detail=f"获取文件树失败: {tree_data}")
+
+    tree = tree_data.get("tree", [])
+    files = [item for item in tree if item["type"] == "blob"]
+
+    # 保存到本地
+    sync_dir = os.path.join(DATA_DIR, "sync", full_name)
+    os.makedirs(sync_dir, exist_ok=True)
+
+    synced = []
+    for file_info in files[:500]:  # 限制最多同步 500 个文件
+        file_path = file_info["path"]
+        local_path = os.path.join(sync_dir, file_path)
+
+        # 获取文件内容
+        f_status, f_data = github_api_get(f"/repos/{full_name}/contents/{file_path}")
+        if f_status == 200 and f_data.get("content"):
+            import base64
+            os.makedirs(os.path.dirname(local_path), exist_ok=True)
+            content = base64.b64decode(f_data["content"])
+            with open(local_path, "wb") as f:
+                f.write(content)
+            synced.append(file_path)
+
+    return {
+        "status": "ok",
+        "repo": full_name,
+        "total_files": len(files),
+        "synced_files": len(synced),
+        "sync_dir": sync_dir,
+    }
 
 
 # ──────────────────────────────────────────────
