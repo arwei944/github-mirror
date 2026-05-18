@@ -37,7 +37,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 
-__version__ = "6.2.0"
+__version__ = "6.2.1"
 
 app = FastAPI(
     version=__version__,
@@ -5588,7 +5588,7 @@ async def mcp_message_endpoint(request: Request):
     # ── initialize ──
     if method == "initialize":
         result = {
-            "protocolVersion": "2024-11-05",
+            "protocolVersion": "2025-11-25",
             "capabilities": {
                 "tools": {"listChanged": False},
             },

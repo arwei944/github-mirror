@@ -4,6 +4,15 @@ import { APP_VERSION } from '../version'
 
 const versions = [
   {
+    version: 'v6.2.1',
+    date: '2026-05-18',
+    changes: [
+      '全局布局响应式修复（100dvh 替换 100vh）',
+      'MCP 协议版本升级至 2025-11-25',
+      '内容区域滚动修复（overflow-y: auto）',
+    ],
+  },
+  {
     version: 'v6.2.0',
     date: '2026-05-18',
     changes: [

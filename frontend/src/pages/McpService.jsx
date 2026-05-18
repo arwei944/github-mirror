@@ -175,7 +175,7 @@ function StatusCard() {
           <code style={{
             fontSize: 12, color: 'var(--mac-text)',
             background: 'var(--mac-bg)', padding: '2px 8px', borderRadius: 4,
-          }}>2024-11-05</code>
+          }}>2025-11-25</code>
         </div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
           <span style={{ fontSize: 10, color: 'var(--mac-text-secondary)' }}>已注册工具</span>

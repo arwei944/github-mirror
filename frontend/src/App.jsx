@@ -495,7 +495,7 @@ export default function App() {
           </div>
         )}
         {/* 页面内容 */}
-        <div>
+        <div style={{ height: '100%', overflowY: 'auto' }}>
           <ErrorBoundary>
             <Suspense fallback={<SkeletonLoader />}>
               {renderPage(currentPage)}
