@@ -13,6 +13,7 @@ import urllib.request
 import urllib.parse
 import urllib.error
 import shutil
+import sqlite3
 import hmac
 import hashlib
 import socket
@@ -37,7 +38,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 
-__version__ = "6.3.0"
+__version__ = "6.4.0"
 
 app = FastAPI(
     version=__version__,
@@ -151,6 +152,65 @@ DATA_DIR = os.environ.get("DATA_DIR", "/data/user/work/github-mirror/data")
 
 # 确保数据目录存在
 Path(DATA_DIR).mkdir(parents=True, exist_ok=True)
+
+# ──────────────────────────────────────────────
+# 同步数据库 (SQLite)
+# ──────────────────────────────────────────────
+SYNC_DB_PATH = os.path.join(DATA_DIR, "sync.db")
+_sync_db_lock = threading.Lock()
+
+def get_sync_db():
+    """获取同步数据库连接"""
+    conn = sqlite3.connect(SYNC_DB_PATH)
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA journal_mode=WAL")
+    return conn
+
+def init_sync_db():
+    """初始化同步数据库表"""
+    with _sync_db_lock:
+        conn = get_sync_db()
+        conn.executescript("""
+            CREATE TABLE IF NOT EXISTS sync_status (
+                repo_name TEXT PRIMARY KEY,
+                status TEXT DEFAULT 'idle',
+                total_files INTEGER DEFAULT 0,
+                synced_files INTEGER DEFAULT 0,
+                sync_dir TEXT,
+                last_sync TEXT,
+                error TEXT,
+                started_at TEXT,
+                completed_at TEXT
+            );
+            CREATE TABLE IF NOT EXISTS repo_data (
+                repo_name TEXT PRIMARY KEY,
+                data_json TEXT,
+                updated_at TEXT
+            );
+            CREATE TABLE IF NOT EXISTS issues_data (
+                repo_name TEXT,
+                issue_number INTEGER,
+                data_json TEXT,
+                updated_at TEXT,
+                PRIMARY KEY (repo_name, issue_number)
+            );
+            CREATE TABLE IF NOT EXISTS prs_data (
+                repo_name TEXT,
+                pr_number INTEGER,
+                data_json TEXT,
+                updated_at TEXT,
+                PRIMARY KEY (repo_name, pr_number)
+            );
+            CREATE TABLE IF NOT EXISTS commits_data (
+                repo_name TEXT,
+                sha TEXT,
+                data_json TEXT,
+                updated_at TEXT,
+                PRIMARY KEY (repo_name, sha)
+            );
+        """)
+        conn.commit()
+        conn.close()
 
 # 静态文件目录
 STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
@@ -5738,7 +5798,549 @@ async def startup_event():
     logger.info(f"HF 用户: {HF_USER or '未配置'}")
     logger.info(f"数据目录: {DATA_DIR}")
     logger.info(f"静态文件目录: {STATIC_DIR}")
+    init_sync_db()
     logger.info("GitHub Mirror 启动完成！")
+
+
+# ──────────────────────────────────────────────
+# 仓库同步 API
+# ──────────────────────────────────────────────
+
+@app.post("/api/sync/repos")
+async def sync_repos(request: Request):
+    """批量同步仓库源代码到本地（git clone）"""
+    body = await request.json()
+    repo_names = body.get("repos", [])
+    if not repo_names:
+        raise HTTPException(status_code=400, detail="请指定要同步的仓库列表")
+
+    results = []
+    for repo_name in repo_names:
+        try:
+            result = await _sync_single_repo(repo_name)
+            results.append(result)
+        except Exception as e:
+            results.append({"repo": repo_name, "status": "error", "error": str(e)})
+
+    return {"results": results}
+
+
+@app.post("/api/sync/repos/{repo_name}")
+async def sync_single_repo(repo_name: str):
+    """同步单个仓库源代码到本地"""
+    result = await _sync_single_repo(repo_name)
+    return result
+
+
+@app.get("/api/sync/status")
+async def get_sync_status():
+    """获取所有仓库的同步状态"""
+    conn = get_sync_db()
+    rows = conn.execute("SELECT * FROM sync_status ORDER BY last_sync DESC").fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+@app.get("/api/sync/status/{repo_name}")
+async def get_repo_sync_status(repo_name: str):
+    """获取单个仓库的同步状态"""
+    conn = get_sync_db()
+    row = conn.execute("SELECT * FROM sync_status WHERE repo_name = ?", (repo_name,)).fetchone()
+    conn.close()
+    if not row:
+        return {"repo_name": repo_name, "status": "not_synced"}
+    return dict(row)
+
+
+@app.post("/api/sync/data/{repo_name}")
+async def sync_repo_data(repo_name: str):
+    """同步仓库 API 数据到本地 SQLite（Issues、PRs、Commits）"""
+    if not GITHUB_TOKEN:
+        raise HTTPException(status_code=401, detail="未配置 GITHUB_TOKEN")
+
+    full_name = f"{GITHUB_USER}/{repo_name}" if "/" not in repo_name else repo_name
+    conn = get_sync_db()
+    now = datetime.now(timezone.utc).isoformat()
+
+    # 1. 同步仓库基本信息
+    s, repo_data = github_api_get(f"/repos/{full_name}")
+    if s == 200:
+        conn.execute("INSERT OR REPLACE INTO repo_data VALUES (?, ?, ?)",
+                     (full_name, json.dumps(repo_data), now))
+
+    # 2. 同步 Issues（最近 100 条）
+    s, issues = github_api_get(f"/repos/{full_name}/issues?state=all&per_page=100&sort=updated&direction=desc")
+    if s == 200 and isinstance(issues, list):
+        for issue in issues:
+            if "pull_request" not in issue:  # 排除 PR
+                conn.execute("INSERT OR REPLACE INTO issues_data VALUES (?, ?, ?, ?)",
+                             (full_name, issue["number"], json.dumps(issue), now))
+
+    # 3. 同步 PRs（最近 100 条）
+    s, prs = github_api_get(f"/repos/{full_name}/pulls?state=all&per_page=100&sort=updated&direction=desc")
+    if s == 200 and isinstance(prs, list):
+        for pr in prs:
+            conn.execute("INSERT OR REPLACE INTO prs_data VALUES (?, ?, ?, ?)",
+                         (full_name, pr["number"], json.dumps(pr), now))
+
+    # 4. 同步 Commits（最近 100 条）
+    s, commits = github_api_get(f"/repos/{full_name}/commits?per_page=100")
+    if s == 200 and isinstance(commits, list):
+        for c in commits:
+            sha = c.get("sha", "")
+            conn.execute("INSERT OR REPLACE INTO commits_data VALUES (?, ?, ?, ?)",
+                         (full_name, sha, json.dumps(c), now))
+
+    conn.commit()
+    conn.close()
+
+    return {"status": "ok", "repo": full_name, "synced_at": now}
+
+
+@app.get("/api/sync/data/{repo_name}")
+async def get_synced_data(repo_name: str, data_type: str = Query("repo", regex="^(repo|issues|prs|commits)$")):
+    """从本地 SQLite 获取已同步的数据"""
+    full_name = f"{GITHUB_USER}/{repo_name}" if "/" not in repo_name else repo_name
+    conn = get_sync_db()
+
+    if data_type == "repo":
+        row = conn.execute("SELECT data_json FROM repo_data WHERE repo_name = ?", (full_name,)).fetchone()
+        conn.close()
+        return json.loads(row["data_json"]) if row else {"error": "not found"}
+    elif data_type == "issues":
+        rows = conn.execute("SELECT data_json FROM issues_data WHERE repo_name = ? ORDER BY issue_number DESC", (full_name,)).fetchall()
+        conn.close()
+        return [json.loads(r["data_json"]) for r in rows]
+    elif data_type == "prs":
+        rows = conn.execute("SELECT data_json FROM prs_data WHERE repo_name = ? ORDER BY pr_number DESC", (full_name,)).fetchall()
+        conn.close()
+        return [json.loads(r["data_json"]) for r in rows]
+    elif data_type == "commits":
+        rows = conn.execute("SELECT data_json FROM commits_data WHERE repo_name = ? ORDER BY rowid DESC", (full_name,)).fetchall()
+        conn.close()
+        return [json.loads(r["data_json"]) for r in rows]
+
+
+async def _sync_single_repo(repo_name: str):
+    """同步单个仓库（git clone）"""
+    if not GITHUB_TOKEN:
+        raise HTTPException(status_code=401, detail="未配置 GITHUB_TOKEN")
+
+    full_name = f"{GITHUB_USER}/{repo_name}" if "/" not in repo_name else repo_name
+    sync_dir = os.path.join(DATA_DIR, "sync", full_name)
+    now = datetime.now(timezone.utc).isoformat()
+
+    # 更新状态
+    conn = get_sync_db()
+    conn.execute("INSERT OR REPLACE INTO sync_status VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                 (full_name, "syncing", 0, 0, sync_dir, None, None, now, None))
+    conn.commit()
+    conn.close()
+
+    try:
+        # 清理旧目录
+        if os.path.exists(sync_dir):
+            shutil.rmtree(sync_dir)
+        os.makedirs(sync_dir, exist_ok=True)
+
+        # git clone
+        clone_url = f"https://github.com/{full_name}.git"
+        env = os.environ.copy()
+        if GITHUB_TOKEN:
+            clone_url = f"https://{GITHUB_TOKEN}@github.com/{full_name}.git"
+
+        result = subprocess.run(
+            ["git", "clone", "--depth", "1", clone_url, sync_dir],
+            capture_output=True, text=True, timeout=600, env=env,
+        )
+
+        if result.returncode != 0:
+            raise Exception(f"git clone 失败: {result.stderr[:500]}")
+
+        # 统计文件数
+        total_files = sum(1 for _, _, files in os.walk(sync_dir) for f in files)
+
+        # 更新状态为成功
+        conn = get_sync_db()
+        conn.execute("UPDATE sync_status SET status=?, total_files=?, synced_files=?, last_sync=?, completed_at=?, error=? WHERE repo_name=?",
+                     ("completed", total_files, total_files, now, now, None, full_name))
+        conn.commit()
+        conn.close()
+
+        return {"repo": full_name, "status": "completed", "total_files": total_files, "sync_dir": sync_dir}
+
+    except Exception as e:
+        conn = get_sync_db()
+        conn.execute("UPDATE sync_status SET status=?, error=?, completed_at=? WHERE repo_name=?",
+                     ("error", str(e)[:500], now, full_name))
+        conn.commit()
+        conn.close()
+        raise
+
+
+# ──────────────────────────────────────────────
+# 一键部署到 HF Space
+# ──────────────────────────────────────────────
+
+def detect_project_type(repo_dir: str) -> dict:
+    """自动检测项目类型并返回部署配置"""
+    result = {"type": "unknown", "framework": None, "build_cmd": None, "start_cmd": None, "port": 7860}
+
+    # 检查 package.json
+    pkg_path = os.path.join(repo_dir, "package.json")
+    if os.path.exists(pkg_path):
+        with open(pkg_path) as f:
+            pkg = json.load(f)
+        deps = {**pkg.get("dependencies", {}), **pkg.get("devDependencies", {})}
+
+        if "next" in deps:
+            result.update({"type": "docker", "framework": "Next.js", "build_cmd": "npm run build", "start_cmd": "npm start", "port": 3000})
+        elif "nuxt" in deps:
+            result.update({"type": "docker", "framework": "Nuxt.js", "build_cmd": "npm run build", "start_cmd": "npm run start", "port": 3000})
+        elif "vite" in deps or "@vitejs/plugin-react" in deps:
+            result.update({"type": "docker", "framework": "Vite React", "build_cmd": "npm run build", "start_cmd": "npx serve -s dist -l 7860", "port": 7860})
+        elif "vue" in deps:
+            result.update({"type": "docker", "framework": "Vue.js", "build_cmd": "npm run build", "start_cmd": "npx serve -s dist -l 7860", "port": 7860})
+        elif "svelte" in deps:
+            result.update({"type": "docker", "framework": "Svelte", "build_cmd": "npm run build", "start_cmd": "npx serve -s dist -l 7860", "port": 7860})
+        elif "express" in deps:
+            result.update({"type": "docker", "framework": "Express", "start_cmd": "node index.js", "port": 3000})
+        elif "astro" in deps:
+            result.update({"type": "docker", "framework": "Astro", "build_cmd": "npm run build", "start_cmd": "npx serve -s dist -l 7860", "port": 7860})
+        else:
+            result.update({"type": "docker", "framework": "Node.js", "start_cmd": "node index.js", "port": 3000})
+
+    # 检查 Python 项目
+    req_path = os.path.join(repo_dir, "requirements.txt")
+    setup_path = os.path.join(repo_dir, "setup.py")
+    pyproject_path = os.path.join(repo_dir, "pyproject.toml")
+
+    if os.path.exists(req_path) or os.path.exists(setup_path) or os.path.exists(pyproject_path):
+        _req_file = req_path if os.path.exists(req_path) else os.devnull
+        with open(_req_file) as f:
+            req_content = f.read().lower()
+
+        if "gradio" in req_content:
+            result.update({"type": "gradio", "framework": "Gradio"})
+        elif "streamlit" in req_content:
+            result.update({"type": "streamlit", "framework": "Streamlit"})
+        elif "flask" in req_content:
+            result.update({"type": "docker", "framework": "Flask", "start_cmd": "python app.py", "port": 7860})
+        elif "fastapi" in req_content or "uvicorn" in req_content:
+            result.update({"type": "docker", "framework": "FastAPI", "start_cmd": "uvicorn app:app --host 0.0.0.0 --port 7860", "port": 7860})
+        elif "django" in req_content:
+            result.update({"type": "docker", "framework": "Django", "start_cmd": "python manage.py runserver 0.0.0.0:7860", "port": 7860})
+        elif result["type"] == "unknown":
+            result.update({"type": "docker", "framework": "Python", "start_cmd": "python app.py", "port": 7860})
+
+    # 检查 Dockerfile
+    if os.path.exists(os.path.join(repo_dir, "Dockerfile")):
+        result["has_dockerfile"] = True
+
+    return result
+
+
+def generate_dockerfile(project_type: dict, repo_dir: str) -> str:
+    """根据项目类型生成 Dockerfile"""
+    fw = project_type.get("framework", "")
+    pt = project_type.get("type", "docker")
+
+    if pt == "gradio":
+        return '''FROM python:3.11-slim
+RUN apt-get update && apt-get install -y --no-install-recommends git && rm -rf /var/lib/apt/lists/*
+WORKDIR /app
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+COPY . .
+EXPOSE 7860
+CMD ["python", "app.py"]
+'''
+
+    if pt == "streamlit":
+        return '''FROM python:3.11-slim
+RUN apt-get update && apt-get install -y --no-install-recommends git && rm -rf /var/lib/apt/lists/*
+WORKDIR /app
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+COPY . .
+EXPOSE 8501
+HEALTHCHECK CMD curl -f http://localhost:8501/_stcore/health || exit 1
+CMD ["streamlit", "run", "app.py", "--server.port=8501", "--server.address=0.0.0.0"]
+'''
+
+    # Docker 类型
+    if "React" in fw or "Vue" in fw or "Svelte" in fw or "Astro" in fw or "Nuxt" in fw or "Next" in fw:
+        build_cmd = project_type.get("build_cmd", "npm run build")
+        start_cmd = project_type.get("start_cmd", "npx serve -s dist -l 7860")
+        port = project_type.get("port", 7860)
+        return f'''FROM node:20-alpine AS builder
+WORKDIR /build
+COPY package.json package-lock.json* ./
+RUN npm ci --prefer-offline 2>/dev/null || npm install
+COPY . .
+RUN {build_cmd}
+
+FROM node:20-alpine
+RUN npm install -g serve
+COPY --from=builder /build/dist ./dist
+EXPOSE {port}
+CMD ["sh", "-c", "{start_cmd}"]
+'''
+
+    if "Flask" in fw or "FastAPI" in fw or "Django" in fw or fw == "Python":
+        start_cmd = project_type.get("start_cmd", "python app.py")
+        return f'''FROM python:3.11-slim
+RUN apt-get update && apt-get install -y --no-install-recommends git curl && rm -rf /var/lib/apt/lists/*
+WORKDIR /app
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+COPY . .
+EXPOSE 7860
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 CMD curl -f http://localhost:7860/ || exit 1
+CMD ["sh", "-c", "{start_cmd}"]
+'''
+
+    if "Express" in fw or fw == "Node.js":
+        start_cmd = project_type.get("start_cmd", "node index.js")
+        port = project_type.get("port", 3000)
+        return f'''FROM node:20-alpine
+WORKDIR /app
+COPY package.json package-lock.json* ./
+RUN npm ci --prefer-offline 2>/dev/null || npm install
+COPY . .
+EXPOSE {port}
+CMD ["sh", "-c", "{start_cmd}"]
+'''
+
+    # 默认
+    return '''FROM python:3.11-slim
+RUN apt-get update && apt-get install -y --no-install-recommends git curl && rm -rf /var/lib/apt/lists/*
+WORKDIR /app
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt 2>/dev/null || true
+COPY . .
+EXPOSE 7860
+CMD ["python", "app.py"]
+'''
+
+
+@app.post("/api/deploy/hf-space")
+async def deploy_to_hf_space(request: Request):
+    """一键部署 GitHub 仓库到 HF Space"""
+    if not HF_TOKEN:
+        raise HTTPException(status_code=401, detail="未配置 HF_TOKEN")
+
+    body = await request.json()
+    github_repo = body.get("github_repo", "")  # e.g. "arwei944/some-project"
+    hf_space_name = body.get("hf_space_name", "")  # e.g. "some-project"
+    hf_space_type = body.get("space_type", "")  # "docker" or empty (auto-detect)
+
+    if not github_repo:
+        raise HTTPException(status_code=400, detail="请指定 github_repo")
+    if not hf_space_name:
+        # 默认使用仓库名
+        hf_space_name = github_repo.split("/")[-1] if "/" in github_repo else github_repo
+
+    # 在后台线程中执行部署
+    thread = threading.Thread(
+        target=_deploy_to_hf_space_bg,
+        args=(github_repo, hf_space_name, hf_space_type),
+        daemon=True,
+    )
+    thread.start()
+
+    return {"status": "started", "github_repo": github_repo, "hf_space": f"{HF_USER}/{hf_space_name}"}
+
+
+@app.get("/api/deploy/hf-space/{space_name}/status")
+async def get_deploy_status(space_name: str):
+    """获取部署状态"""
+    conn = get_sync_db()
+    row = conn.execute("SELECT * FROM sync_status WHERE repo_name = ?", (f"deploy:{space_name}",)).fetchone()
+    conn.close()
+    if not row:
+        return {"space_name": space_name, "status": "not_found"}
+    return dict(row)
+
+
+def _deploy_to_hf_space_bg(github_repo: str, hf_space_name: str, hf_space_type: str):
+    """后台线程：部署到 HF Space"""
+    deploy_key = f"deploy:{hf_space_name}"
+    work_dir = os.path.join(DATA_DIR, "deploy", hf_space_name)
+    now = datetime.now(timezone.utc).isoformat()
+
+    # 更新状态
+    conn = get_sync_db()
+    conn.execute("INSERT OR REPLACE INTO sync_status VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                 (deploy_key, "cloning", 0, 0, work_dir, None, None, now, None))
+    conn.commit()
+    conn.close()
+
+    try:
+        # Step 1: Clone
+        if os.path.exists(work_dir):
+            shutil.rmtree(work_dir)
+        os.makedirs(work_dir, exist_ok=True)
+
+        repo_dir = os.path.join(work_dir, "repo")
+        clone_url = f"https://{GITHUB_TOKEN}@github.com/{github_repo}.git" if GITHUB_TOKEN else f"https://github.com/{github_repo}.git"
+
+        result = subprocess.run(
+            ["git", "clone", "--depth", "1", clone_url, repo_dir],
+            capture_output=True, text=True, timeout=600,
+        )
+        if result.returncode != 0:
+            raise Exception(f"克隆失败: {result.stderr[:500]}")
+
+        # Step 2: Detect project type
+        conn = get_sync_db()
+        conn.execute("UPDATE sync_status SET status=? WHERE repo_name=?", ("detecting", deploy_key))
+        conn.commit()
+        conn.close()
+
+        project_type = detect_project_type(repo_dir)
+
+        # Step 3: Generate Dockerfile if needed
+        if hf_space_type == "docker" or project_type["type"] == "docker":
+            dockerfile = generate_dockerfile(project_type, repo_dir)
+            with open(os.path.join(repo_dir, "Dockerfile"), "w") as f:
+                f.write(dockerfile)
+
+        # Step 4: Create HF Space
+        conn = get_sync_db()
+        conn.execute("UPDATE sync_status SET status=? WHERE repo_name=?", ("creating_space", deploy_key))
+        conn.commit()
+        conn.close()
+
+        try:
+            from huggingface_hub import HfApi
+            hf_api = HfApi(token=HF_TOKEN)
+
+            repo_id = f"{HF_USER}/{hf_space_name}"
+            hf_api.create_repo(
+                repo_id=repo_id,
+                repo_type="space",
+                space_sdk="docker" if project_type["type"] in ("docker",) else hf_space_type or "docker",
+                exist_ok=True,
+                private=False,
+            )
+        except Exception as e:
+            logger.warning(f"创建 HF Space 失败（可能已存在）: {e}")
+
+        # Step 5: Push to HF
+        conn = get_sync_db()
+        conn.execute("UPDATE sync_status SET status=? WHERE repo_name=?", ("pushing", deploy_key))
+        conn.commit()
+        conn.close()
+
+        try:
+            from huggingface_hub import HfApi
+            hf_api = HfApi(token=HF_TOKEN)
+
+            hf_api.upload_folder(
+                folder_path=repo_dir,
+                repo_id=f"{HF_USER}/{hf_space_name}",
+                repo_type="space",
+                ignore_patterns=[".git/*", "node_modules/*", "__pycache__/*", ".env", "*.pyc"],
+                commit_message=f"Deploy from {github_repo}",
+            )
+        except Exception as e:
+            raise Exception(f"推送到 HF 失败: {e}")
+
+        # 完成
+        conn = get_sync_db()
+        conn.execute("UPDATE sync_status SET status=?, completed_at=? WHERE repo_name=?",
+                     ("completed", now, deploy_key))
+        conn.commit()
+        conn.close()
+
+        logger.info(f"[部署] {github_repo} -> {HF_USER}/{hf_space_name} 完成")
+
+    except Exception as e:
+        logger.error(f"[部署] {github_repo} 失败: {e}")
+        conn = get_sync_db()
+        conn.execute("UPDATE sync_status SET status=?, error=?, completed_at=? WHERE repo_name=?",
+                     ("error", str(e)[:500], now, deploy_key))
+        conn.commit()
+        conn.close()
+
+
+@app.get("/api/deploy/detect/{repo_name}")
+async def detect_repo_type(repo_name: str):
+    """检测仓库项目类型（不克隆，通过 API 分析）"""
+    if not GITHUB_TOKEN:
+        raise HTTPException(status_code=401, detail="未配置 GITHUB_TOKEN")
+
+    full_name = f"{GITHUB_USER}/{repo_name}" if "/" not in repo_name else repo_name
+
+    # 获取仓库文件列表
+    s, tree = github_api_get(f"/repos/{full_name}/git/trees/main?recursive=1")
+    if s != 200:
+        raise HTTPException(status_code=s, detail=f"获取文件树失败")
+
+    files = [item["path"] for item in tree.get("tree", []) if item["type"] == "blob"]
+
+    result = {"type": "unknown", "framework": None, "files": files[:50]}
+
+    has_package_json = "package.json" in files
+    has_requirements = "requirements.txt" in files
+    has_dockerfile = "Dockerfile" in files
+    has_gradio = False
+    has_streamlit = False
+    has_flask = False
+    has_fastapi = False
+
+    # 检查 requirements.txt 内容
+    if has_requirements:
+        s2, content_data = github_api_get(f"/repos/{full_name}/contents/requirements.txt")
+        if s2 == 200 and content_data.get("content"):
+            import base64
+            req_text = base64.b64decode(content_data["content"]).decode("utf-8", errors="ignore").lower()
+            has_gradio = "gradio" in req_text
+            has_streamlit = "streamlit" in req_text
+            has_flask = "flask" in req_text
+            has_fastapi = "fastapi" in req_text or "uvicorn" in req_text
+
+    # 检查 package.json 内容
+    deps = set()
+    if has_package_json:
+        s3, pkg_data = github_api_get(f"/repos/{full_name}/contents/package.json")
+        if s3 == 200 and pkg_data.get("content"):
+            import base64
+            pkg_text = base64.b64decode(pkg_data["content"]).decode("utf-8", errors="ignore")
+            try:
+                pkg = json.loads(pkg_text)
+                deps = set(list(pkg.get("dependencies", {}).keys()) + list(pkg.get("devDependencies", {}).keys()))
+            except:
+                pass
+
+    if has_gradio:
+        result.update({"type": "gradio", "framework": "Gradio"})
+    elif has_streamlit:
+        result.update({"type": "streamlit", "framework": "Streamlit"})
+    elif "next" in deps:
+        result.update({"type": "docker", "framework": "Next.js"})
+    elif "nuxt" in deps:
+        result.update({"type": "docker", "framework": "Nuxt.js"})
+    elif "vite" in deps or "@vitejs/plugin-react" in deps:
+        result.update({"type": "docker", "framework": "Vite React"})
+    elif "vue" in deps:
+        result.update({"type": "docker", "framework": "Vue.js"})
+    elif "svelte" in deps:
+        result.update({"type": "docker", "framework": "Svelte"})
+    elif has_fastapi:
+        result.update({"type": "docker", "framework": "FastAPI"})
+    elif has_flask:
+        result.update({"type": "docker", "framework": "Flask"})
+    elif "django" in (f.lower() for f in files):
+        result.update({"type": "docker", "framework": "Django"})
+    elif has_requirements:
+        result.update({"type": "docker", "framework": "Python"})
+    elif has_package_json:
+        result.update({"type": "docker", "framework": "Node.js"})
+
+    result["has_dockerfile"] = has_dockerfile
+    return result
 
 
 if __name__ == "__main__":

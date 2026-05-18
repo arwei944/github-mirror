@@ -4,6 +4,22 @@ import { APP_VERSION } from '../version'
 
 const versions = [
   {
+    version: 'v6.4.0',
+    date: '2026-05-18',
+    changes: [
+      '实时同步：Webhook 事件广播到 SSE/WS 客户端',
+      '实时同步：SSE 收到事件后自动触发 loadAll 刷新',
+      '实时同步：Webhook 触发后端缓存主动失效',
+      '仓库同步：git clone 源代码到本地存储',
+      '仓库同步：API 数据持久化到 SQLite（Issues/PRs/Commits）',
+      '一键部署：自动检测项目类型（10+ 框架）',
+      '一键部署：自动生成 Dockerfile 并部署到 HF Space',
+      '活动流增强：彩色类型标签 + 详细信息展示',
+      '提交列表增强：头像 + 增删统计 + SHA 复制',
+      '新增同步管理页面（系统分组）',
+    ],
+  },
+  {
     version: 'v6.3.0',
     date: '2026-05-18',
     changes: [

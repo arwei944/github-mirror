@@ -31,6 +31,7 @@ const Starred = lazy(() => import('./pages/Starred'))
 const EnvVars = lazy(() => import('./pages/EnvVars'))
 const About = lazy(() => import('./pages/About'))
 const McpService = lazy(() => import('./pages/McpService'))
+const SyncManage = lazy(() => import('./pages/SyncManage'))
 
 // ============ Icons ============
 const Icon = {
@@ -320,6 +321,7 @@ export default function App() {
       { key: 'settings', label: '仓库设置', icon: Icon.settings(14) },
       { key: 'global-settings', label: '全局设置', icon: Icon.settings(14) },
       { key: 'env-vars', label: '环境变量', icon: Icon.keyRound(14) },
+      { key: 'sync-manage', label: '同步管理', icon: Icon.refresh(14) },
       { key: 'about', label: '关于', icon: Icon.info(14) },
     ],
   }
@@ -461,6 +463,8 @@ export default function App() {
           return <Deploy githubRepos={githubRepos} projects={projects} hfSpaces={hfSpaces} onRefresh={loadAll} />
         case 'env-vars':
           return <EnvVars />
+        case 'sync-manage':
+          return <SyncManage repos={githubRepos} onSelectRepo={handleSelectRepo} />
         case 'about':
           return <About />
         default:
