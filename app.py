@@ -8,19 +8,36 @@ import os
 import subprocess
 import threading
 import time
+import asyncio
 import urllib.request
 import urllib.parse
 import urllib.error
 import shutil
+import hmac
+import hashlib
+import socket
+import ipaddress
+import re
+import logging
+
+# 配置日志
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+)
+logger = logging.getLogger("github-mirror")
+from collections import defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Dict
 
 from fastapi import FastAPI, Query, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
+from fastapi.middleware.cors import CORSMiddleware
 
-__version__ = "6.0.0"
+__version__ = "6.1.0"
 
 app = FastAPI(
     version=__version__,
@@ -29,12 +46,107 @@ app = FastAPI(
 )
 
 # ──────────────────────────────────────────────
+# CORS 配置
+# ──────────────────────────────────────────────
+_cors_origins = os.environ.get("CORS_ORIGINS", "*").split(",")
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[o.strip() for o in _cors_origins if o.strip()],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# ──────────────────────────────────────────────
+# API Key 认证
+# ──────────────────────────────────────────────
+API_KEY = os.environ.get("API_KEY", "")  # 为空则不启用认证
+API_KEY_HEADER = "X-API-Key"
+
+# 白名单路径（无需认证）
+_PUBLIC_PATHS = {"/", "/health", "/docs", "/openapi.json", "/redoc"}
+
+def _is_public_path(path: str) -> bool:
+    """检查路径是否在白名单中"""
+    if path in _PUBLIC_PATHS:
+        return True
+    # MCP SSE 端点通过 query param 传递 session_id，不检查 API Key
+    if path.startswith("/mcp/sse"):
+        return True
+    # 静态文件
+    if path.startswith("/assets/"):
+        return True
+    return False
+
+@app.middleware("http")
+async def api_key_middleware(request: Request, call_next):
+    """API Key 认证中间件"""
+    # 如果未配置 API_KEY，跳过认证
+    if not API_KEY:
+        return await call_next(request)
+
+    path = request.url.path
+    if _is_public_path(path):
+        return await call_next(request)
+
+    # 检查 API Key
+    api_key = request.headers.get(API_KEY_HEADER, "")
+    # 也支持 query param 传递（方便调试）
+    if not api_key:
+        api_key = request.query_params.get("api_key", "")
+
+    if not hmac.compare_digest(api_key, API_KEY):
+        return JSONResponse(
+            status_code=401,
+            content={"detail": "Invalid or missing API key. Provide X-API-Key header."},
+        )
+
+    return await call_next(request)
+
+# ──────────────────────────────────────────────
+# 简易速率限制（基于内存）
+# ──────────────────────────────────────────────
+_rate_limit_store: Dict[str, list] = defaultdict(list)
+_RATE_LIMIT_WINDOW = 60  # 秒
+_RATE_LIMIT_MAX_REQUESTS = int(os.environ.get("RATE_LIMIT_MAX", "120"))  # 每分钟每IP最大请求数
+_RATE_LIMIT_ENABLED = os.environ.get("RATE_LIMIT_ENABLED", "true").lower() == "true"
+
+@app.middleware("http")
+async def rate_limit_middleware(request: Request, call_next):
+    """简易速率限制中间件"""
+    if not _RATE_LIMIT_ENABLED:
+        return await call_next(request)
+
+    path = request.url.path
+    if _is_public_path(path):
+        return await call_next(request)
+
+    # 获取客户端 IP
+    client_ip = request.client.host if request.client else "unknown"
+    now = time.time()
+
+    # 清理过期记录
+    _rate_limit_store[client_ip] = [
+        t for t in _rate_limit_store[client_ip] if now - t < _RATE_LIMIT_WINDOW
+    ]
+
+    if len(_rate_limit_store[client_ip]) >= _RATE_LIMIT_MAX_REQUESTS:
+        return JSONResponse(
+            status_code=429,
+            content={"detail": f"Rate limit exceeded. Max {_RATE_LIMIT_MAX_REQUESTS} requests per {_RATE_LIMIT_WINDOW}s."},
+        )
+
+    _rate_limit_store[client_ip].append(now)
+    return await call_next(request)
+
+# ──────────────────────────────────────────────
 # 环境变量
 # ──────────────────────────────────────────────
 GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN", "")
 GITHUB_USER = os.environ.get("GITHUB_USER", "")
 HF_TOKEN = os.environ.get("HF_TOKEN", "")
 HF_USER = os.environ.get("HF_USER", "")
+WEBHOOK_SECRET = os.environ.get("WEBHOOK_SECRET", "")
 DATA_DIR = os.environ.get("DATA_DIR", "/data/user/work/github-mirror/data")
 
 # 确保数据目录存在
@@ -123,34 +235,41 @@ def github_api_patch(path: str, data: Optional[dict] = None, **kwargs) -> tuple:
 # ──────────────────────────────────────────────
 class TTLCache:
     """带 TTL 的内存缓存"""
-    def __init__(self, default_ttl=60):
-        self._cache = {}
+    def __init__(self, default_ttl=300, max_size=1000):
+        self._cache: Dict[str, tuple] = {}
         self._default_ttl = default_ttl
+        self._max_size = max_size
 
-    def get(self, key):
-        entry = self._cache.get(key)
-        if entry is None:
-            return None
-        if time.time() - entry['time'] > entry['ttl']:
+    def get(self, key: str):
+        if key in self._cache:
+            value, expire_at = self._cache[key]
+            if time.time() < expire_at:
+                return value
             del self._cache[key]
-            return None
-        return entry['value']
+        return None
 
-    def set(self, key, value, ttl=None):
-        self._cache[key] = {
-            'value': value,
-            'ttl': ttl or self._default_ttl,
-            'time': time.time()
-        }
+    def set(self, key: str, value, ttl=None):
+        # 如果超过容量，删除最旧的条目
+        if len(self._cache) >= self._max_size and key not in self._cache:
+            # 删除最早过期的条目
+            oldest_key = min(self._cache, key=lambda k: self._cache[k][1])
+            del self._cache[oldest_key]
+        expire_at = time.time() + (ttl if ttl is not None else self._default_ttl)
+        self._cache[key] = (value, expire_at)
 
-    def invalidate(self, key):
-        self._cache.pop(key, None)
+    def invalidate(self, prefix: str):
+        keys_to_delete = [k for k in self._cache if k.startswith(prefix)]
+        for k in keys_to_delete:
+            del self._cache[k]
 
     def clear(self):
         self._cache.clear()
 
+    def stats(self):
+        return {"entries": len(self._cache), "max_size": self._max_size}
+
 # 缓存实例
-api_cache = TTLCache(default_ttl=60)
+api_cache = TTLCache(default_ttl=300, max_size=2000)
 
 # 缓存配置: 端点路径前缀 -> TTL (秒)
 CACHE_CONFIG = {
@@ -209,24 +328,27 @@ async def cache_middleware(request: Request, call_next):
 # 数据持久化
 # ──────────────────────────────────────────────
 PROJECTS_FILE = os.path.join(DATA_DIR, "projects.json")
+_projects_lock = threading.Lock()
 
 
 def load_projects() -> dict:
     """加载项目数据"""
-    if os.path.exists(PROJECTS_FILE):
-        try:
-            with open(PROJECTS_FILE, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except (json.JSONDecodeError, IOError):
-            return {}
-    return {}
+    with _projects_lock:
+        if os.path.exists(PROJECTS_FILE):
+            try:
+                with open(PROJECTS_FILE, "r", encoding="utf-8") as f:
+                    return json.load(f)
+            except (json.JSONDecodeError, IOError):
+                return {}
+        return {}
 
 
 def save_projects(projects: dict):
     """保存项目数据"""
-    Path(DATA_DIR).mkdir(parents=True, exist_ok=True)
-    with open(PROJECTS_FILE, "w", encoding="utf-8") as f:
-        json.dump(projects, f, ensure_ascii=False, indent=2)
+    with _projects_lock:
+        Path(DATA_DIR).mkdir(parents=True, exist_ok=True)
+        with open(PROJECTS_FILE, "w", encoding="utf-8") as f:
+            json.dump(projects, f, ensure_ascii=False, indent=2)
 
 
 # ──────────────────────────────────────────────
@@ -803,6 +925,9 @@ _WEBHOOK_MAX_EVENTS = 100
 _mcp_tool_calls: list = []
 _MCP_TOOL_CALLS_MAX = 200
 
+# 异步锁（保护全局状态）
+_state_lock = asyncio.Lock()
+
 
 @app.post("/api/webhooks/github")
 async def github_webhook(request: Request):
@@ -811,10 +936,24 @@ async def github_webhook(request: Request):
     支持自动部署：当收到 push 事件时，检查对应项目是否开启自动部署
     """
     import json
-    
+
     try:
         body = await request.body()
-        payload = json.loads(body)
+
+        # 签名验证
+        if WEBHOOK_SECRET:
+            sig = request.headers.get("X-Hub-Signature-256", "")
+            if not sig:
+                return JSONResponse(status_code=401, content={"detail": "Missing signature"})
+            expected = "sha256=" + hmac.new(
+                WEBHOOK_SECRET.encode(), body, hashlib.sha256
+            ).hexdigest()
+            if not hmac.compare_digest(sig, expected):
+                return JSONResponse(status_code=401, content={"detail": "Invalid signature"})
+            payload = json.loads(body)
+        else:
+            payload = json.loads(body)
+
         event_type = request.headers.get("X-GitHub-Event", "unknown")
         
         # 获取仓库信息
@@ -835,9 +974,10 @@ async def github_webhook(request: Request):
         }
         
         # 添加到存储
-        _webhook_events.insert(0, event)
-        if len(_webhook_events) > _WEBHOOK_MAX_EVENTS:
-            _webhook_events.pop()
+        async with _state_lock:
+            _webhook_events.insert(0, event)
+            if len(_webhook_events) > _WEBHOOK_MAX_EVENTS:
+                _webhook_events.pop()
         
         # ──────────────────────────────────────────────
         # 自动部署逻辑 (v6.0.0)
@@ -907,9 +1047,10 @@ async def huggingface_webhook(request: Request):
         }
         
         # 添加到存储
-        _webhook_events.insert(0, event)
-        if len(_webhook_events) > _WEBHOOK_MAX_EVENTS:
-            _webhook_events.pop()
+        async with _state_lock:
+            _webhook_events.insert(0, event)
+            if len(_webhook_events) > _WEBHOOK_MAX_EVENTS:
+                _webhook_events.pop()
         
         return {"status": "received", "event_id": event["id"]}
     except Exception as e:
@@ -3475,12 +3616,16 @@ def run_deploy(project_name: str, project_config: dict):
         os.makedirs(work_dir, exist_ok=True)
 
         # Step 1: 从 GitHub 克隆 (不用 --depth 1，避免 shallow update not allowed)
-        clone_url = f"https://{GITHUB_TOKEN}@github.com/{github_repo}.git"
+        clone_url = f"https://github.com/{github_repo}.git"
         print(f"[部署] {project_name} 正在克隆 {github_repo} ...")
+
+        clone_env = os.environ.copy()
+        if GITHUB_TOKEN:
+            clone_env["GIT_ASKPASS"] = "echo"
 
         clone_result = subprocess.run(
             ["git", "clone", "--branch", branch, clone_url, repo_dir],
-            capture_output=True, text=True, timeout=300,
+            capture_output=True, text=True, timeout=300, env=clone_env,
         )
         if clone_result.returncode != 0:
             print(f"[部署] {project_name} 克隆失败: {clone_result.stderr}")
@@ -3499,8 +3644,14 @@ def run_deploy(project_name: str, project_config: dict):
         print(f"[部署] {project_name} 克隆成功")
 
         # Step 2: 推送到 HuggingFace Space
-        hf_url = f"https://{HF_USER}:{HF_TOKEN}@huggingface.co/spaces/{hf_space}"
+        hf_url = f"https://huggingface.co/spaces/{hf_space}"
         print(f"[部署] {project_name} 正在推送到 {hf_space} ...")
+
+        # 配置 HF 认证环境变量
+        hf_env = os.environ.copy()
+        if HF_TOKEN:
+            hf_env["HF_TOKEN"] = HF_TOKEN
+            hf_env["GIT_ASKPASS"] = "echo"
 
         # 配置 git
         subprocess.run(
@@ -3521,7 +3672,7 @@ def run_deploy(project_name: str, project_config: dict):
         # 强制推送到 HF
         push_result = subprocess.run(
             ["git", "push", "hf", f"{branch}:main", "--force"],
-            cwd=repo_dir, capture_output=True, text=True, timeout=300,
+            cwd=repo_dir, capture_output=True, text=True, timeout=300, env=hf_env,
         )
         if push_result.returncode != 0:
             print(f"[部署] {project_name} 推送到 HF 失败: {push_result.stderr}")
@@ -3711,7 +3862,34 @@ async def list_hf_spaces():
 # ──────────────────────────────────────────────
 @app.get("/health")
 async def health():
-    return {"status": "ok", "version": __version__}
+    checks = {
+        "status": "ok",
+        "version": __version__,
+        "github_token": bool(GITHUB_TOKEN),
+        "hf_token": bool(HF_TOKEN),
+        "github_user": GITHUB_USER or None,
+        "hf_user": HF_USER or None,
+    }
+    # 检查 GitHub API 连通性
+    if GITHUB_TOKEN:
+        try:
+            req = urllib.request.Request(
+                f"{GITHUB_API_BASE}/user",
+                headers={"Authorization": f"token {GITHUB_TOKEN}"},
+            )
+            with urllib.request.urlopen(req, timeout=5) as resp:
+                if resp.status == 200:
+                    checks["github_api"] = "ok"
+                else:
+                    checks["github_api"] = f"error_{resp.status}"
+        except Exception as e:
+            checks["github_api"] = f"error: {str(e)[:50]}"
+    else:
+        checks["github_api"] = "not_configured"
+
+    overall = "ok" if checks.get("github_api") in ("ok", "not_configured") else "degraded"
+    checks["status"] = overall
+    return checks
 
 
 @app.get("/api/stats")
@@ -3777,13 +3955,12 @@ async def http_exception_handler(request: Request, exc: HTTPException):
 
 @app.exception_handler(Exception)
 async def general_exception_handler(request: Request, exc: Exception):
+    logging.exception(f"Unhandled exception on {request.url.path}")
     return JSONResponse(
         status_code=500,
         content={
-            "error": "服务器内部错误",
-            "code": 1002,
-            "detail": f"{str(exc)}",
-            "status_code": 500,
+            "detail": "Internal server error",
+            "type": type(exc).__name__,
         },
     )
 
@@ -4036,10 +4213,7 @@ import json as _json
 
 # 事件队列（内存，最近 100 条）
 event_queue = deque(maxlen=100)
-# WebSocket 连接管理
-ws_clients: list[WebSocket] = []
-# Webhook 密钥
-WEBHOOK_SECRET = os.environ.get("WEBHOOK_SECRET", "")
+# Webhook 密钥（已在顶部环境变量区域定义）
 
 
 class ConnectionManager:
@@ -4285,51 +4459,6 @@ async def get_readme(repo_name: str):
         "sha": data.get("sha", ""),
     }
 
-@app.get("/api/github/repos/{repo_name}/branches")
-async def get_branches(repo_name: str, request: Request):
-    """获取仓库分支列表 (v5.4.0)"""
-    params = dict(request.query_params)
-    params.setdefault("per_page", "30")
-    query_string = "&".join(f"{k}={v}" for k, v in params.items())
-    status, data = github_api_get(f"/repos/{repo_name}/branches?{query_string}")
-    if status == 200 and isinstance(data, list):
-        return data
-    return []
-
-@app.get("/api/github/repos/{repo_name}/releases")
-async def get_releases(repo_name: str, request: Request):
-    """获取仓库发布版本列表 (v5.4.0)"""
-    params = dict(request.query_params)
-    params.setdefault("per_page", "10")
-    query_string = "&".join(f"{k}={v}" for k, v in params.items())
-    status, data = github_api_get(f"/repos/{repo_name}/releases?{query_string}")
-    if status == 200 and isinstance(data, list):
-        return data
-    return []
-
-@app.get("/api/github/repos/{repo_name}/contents/{path:path}")
-async def get_contents(repo_name: str, path: str = ""):
-    """获取仓库文件/目录内容 (v5.4.0)"""
-    status, data = github_api_get(f"/repos/{repo_name}/contents/{path}")
-    if status == 200:
-        return data if data else []
-    return []
-
-@app.get("/api/github/repos/{repo_name}/commits")
-async def get_commits(repo_name: str, request: Request):
-    """获取仓库提交历史 (v5.4.0)"""
-    params = dict(request.query_params)
-    params.setdefault("per_page", "20")
-    branch = params.pop("branch", None)
-    if branch:
-        params["sha"] = branch
-    query_string = "&".join(f"{k}={v}" for k, v in params.items())
-    status, data = github_api_get(f"/repos/{repo_name}/commits?{query_string}")
-    if status == 200 and isinstance(data, list):
-        return data
-    return []
-
-
 # ──────────────────────────────────────────────
 # GitHub Trending API (v5.4.2)
 # ──────────────────────────────────────────────
@@ -4403,7 +4532,7 @@ async def cache_stats():
     """查看缓存统计"""
     return {
         "status": "ok",
-        "entries": len(api_cache._cache),
+        **api_cache.stats(),
         "config": CACHE_CONFIG,
     }
 
@@ -4770,37 +4899,90 @@ _register_tool(
 
 # ── 安全策略 ───────────────────────────────────
 
-# Shell 危险命令黑名单 (正则)
-_DANGEROUS_CMD_PATTERNS = [
-    r"\brm\s+(-[a-zA-Z]*f[a-zA-Z]*\s+)?/\s*$",
-    r"\brm\s+(-[a-zA-Z]*f[a-zA-Z]*\s+)?/\s",
-    r"\brm\s+(-[a-zA-Z]*r[a-zA-Z]*f[a-zA-Z]*\s+)?/\*",
-    r"\bmkfs\b",
-    r"\bdd\s+.*of=/dev/",
-    r">\s*/dev/sd[a-z]",
-    r"\bchmod\s+(-R\s+)?777\s+/",
-    r"\bshutdown\b",
-    r"\breboot\b",
-    r"\binit\s+0\b",
-    r"\b:()\s*{\s*:\|:&\s*};:",  # fork bomb
-    r"\bnc\s+-[a-zA-Z]*[eE]",
-    r"\bcurl\b.*\|\s*bash",
-    r"\bwget\b.*\|\s*bash",
+# Shell 安全策略：白名单模式（仅允许安全命令）
+_SHELL_ALLOWED_COMMANDS = [
+    r"^git\s",           # git 命令
+    r"^docker\s",        # docker 命令
+    r"^ls\s",            # 列目录
+    r"^cat\s",           # 查看文件
+    r"^head\s",          # 查看文件头部
+    r"^tail\s",          # 查看文件尾部
+    r"^grep\s",          # 搜索
+    r"^find\s",          # 查找文件
+    r"^wc\s",            # 统计
+    r"^echo\s",          # 输出
+    r"^pwd\s*$",         # 当前目录
+    r"^whoami\s*$",      # 当前用户
+    r"^date\s*$",        # 日期
+    r"^uname\s",         # 系统信息
+    r"^df\s",            # 磁盘使用
+    r"^free\s",          # 内存使用
+    r"^ps\s",            # 进程列表
+    r"^python3?\s",      # Python
+    r"^node\s",          # Node.js
+    r"^npm\s",           # npm
+    r"^pip3?\s",         # pip
+    r"^curl\s",          # curl（只读）
+    r"^wget\s",          # wget
+    r"^tar\s",           # tar
+    r"^zip\s",           # zip
+    r"^unzip\s",         # unzip
+    r"^mkdir\s",         # 创建目录
+    r"^cp\s",            # 复制
+    r"^mv\s",            # 移动
+    r"^touch\s",         # 创建文件
+    r"^chmod\s",         # 修改权限（非777）
+    r"^env\s*$",         # 环境变量
+    r"^which\s",         # 查找命令
+    r"^stat\s",          # 文件状态
+    r"^file\s",          # 文件类型
+]
+
+# Shell 危险命令黑名单（额外检查）
+_SHELL_DANGEROUS_PATTERNS = [
+    r">\s*/dev/",                    # 写入设备文件
+    r"\bmkfs\b",                     # 格式化
+    r"\bdd\s+.*of=/dev/",            # dd 写设备
+    r"\bshutdown\b",                 # 关机
+    r"\breboot\b",                   # 重启
+    r"\binit\s+[06]\b",              # 切换运行级别
+    r"\b:()\s*\{\s*:\|:&\s*};:",     # fork bomb
+    r"\bsudo\s",                     # sudo
+    r"\bsu\s",                       # su
+    r"\bchmod\s+(-R\s+)?777\s+/",    # chmod 777
+    r"\bcrontab\b",                  # 定时任务
+    r"\bnohup\b",                    # 后台运行
+    r"\|\s*(ba)?sh\b",               # 管道到 shell
+    r"`.*`",                         # 命令替换
+    r"\$\(\s*",                      # 命令替换 $(...)
 ]
 
 _SHELL_MAX_TIMEOUT = 30  # 秒
 
-# 代理 URL 黑名单 (正则)
+# 代理 URL 黑名单 (增强版)
 _PROXY_URL_BLACKLIST = [
+    # 回环地址
     r"localhost",
     r"127\.0\.0\.\d+",
     r"0\.0\.0\.0",
+    r"\[::1\]",
+    r"\[0:0:0:0:0:0:0:1\]",
+    # RFC 1918 私有地址
     r"10\.\d+\.\d+\.\d+",
     r"172\.(1[6-9]|2\d|3[01])\.\d+\.\d+",
     r"192\.168\.\d+\.\d+",
+    # 链路本地地址
     r"169\.254\.\d+\.\d+",
+    r"fe80::",
+    # 元数据端点
     r"metadata\.google\.internal",
     r"169\.254\.169\.254",
+    # AWS 特定
+    r"\.internal\b",
+    r"ec2\.amazonaws\.com.*\/meta-data",
+    # 云厂商元数据
+    r"100\.100\.100\.200",      # 阿里云
+    r"metadata\.tencentcloudapi\.com",  # 腾讯云
 ]
 
 # 代理 URL 白名单 (为空则仅依赖黑名单)
@@ -4812,9 +4994,14 @@ def _is_shell_command_safe(cmd: str) -> tuple:
     stripped = cmd.strip()
     if not stripped:
         return False, "命令不能为空"
-    for pattern in _DANGEROUS_CMD_PATTERNS:
+    # 黑名单检查
+    for pattern in _SHELL_DANGEROUS_PATTERNS:
         if re.search(pattern, stripped, re.IGNORECASE):
             return False, f"命令匹配危险模式: {pattern}"
+    # 白名单检查
+    allowed = any(re.match(p, stripped) for p in _SHELL_ALLOWED_COMMANDS)
+    if not allowed:
+        return False, f"命令不在允许列表中。允许的命令: git, docker, ls, cat, grep, find, python, node, npm, pip 等"
     return True, ""
 
 
@@ -4830,6 +5017,23 @@ def _is_proxy_url_allowed(url: str) -> tuple:
     for pattern in _PROXY_URL_BLACKLIST:
         if re.search(pattern, url, re.IGNORECASE):
             return False, f"URL 匹配黑名单模式: {pattern}"
+
+    # DNS 解析检查（防止 DNS rebinding）
+    try:
+        parsed = urllib.parse.urlparse(url)
+        hostname = parsed.hostname
+        if hostname:
+            try:
+                resolved_ips = socket.getaddrinfo(hostname, None)
+                for _, _, _, _, sockaddr in resolved_ips:
+                    ip = ipaddress.ip_address(sockaddr[0])
+                    if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved:
+                        return False, f"URL 解析到私有/保留 IP: {ip}"
+            except (socket.gaierror, ValueError):
+                pass  # DNS 解析失败，让请求继续（会自然失败）
+    except Exception:
+        pass  # 安全检查失败不应阻止正常请求
+
     return True, ""
 
 
@@ -4883,6 +5087,9 @@ def _record_mcp_tool_call(tool_name: str, arguments: dict, result: dict, session
         "action": "called" if success else "failed",
     }
 
+    # 使用异步锁保护全局状态
+    # 注意：此函数在 async 上下文中调用，但 _state_lock 是 asyncio.Lock
+    # 由于列表操作是原子的且 GIL 保护，这里直接操作是安全的
     _mcp_tool_calls.insert(0, event)
     if len(_mcp_tool_calls) > _MCP_TOOL_CALLS_MAX:
         _mcp_tool_calls.pop()
@@ -5405,12 +5612,12 @@ async def mcp_message_endpoint(request: Request):
 # ──────────────────────────────────────────────
 @app.on_event("startup")
 async def startup_event():
-    print(f"GitHub Mirror v{__version__} 启动中...")
-    print(f"GitHub 用户: {GITHUB_USER or '未配置'}")
-    print(f"HF 用户: {HF_USER or '未配置'}")
-    print(f"数据目录: {DATA_DIR}")
-    print(f"静态文件目录: {STATIC_DIR}")
-    print("GitHub Mirror 启动完成！")
+    logger.info(f"GitHub Mirror v{__version__} 启动中...")
+    logger.info(f"GitHub 用户: {GITHUB_USER or '未配置'}")
+    logger.info(f"HF 用户: {HF_USER or '未配置'}")
+    logger.info(f"数据目录: {DATA_DIR}")
+    logger.info(f"静态文件目录: {STATIC_DIR}")
+    logger.info("GitHub Mirror 启动完成！")
 
 
 if __name__ == "__main__":
