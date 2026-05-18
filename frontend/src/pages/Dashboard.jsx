@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react'
 import api from '../api'
+import { timeAgo } from '../utils/timeAgo'
 
 // ============ SVG Icons (sidebar-consistent style) ============
 const Icon = {
@@ -92,16 +93,6 @@ function getEventIcon(type, color) {
     case 'WatchEvent': return Icon.watch(s, c)
     default: return Icon.activity(s, c)
   }
-}
-
-function timeAgo(dateStr) {
-  if (!dateStr) return ''
-  const diff = Math.floor((Date.now() - new Date(dateStr)) / 1000)
-  if (diff < 60) return '刚刚'
-  if (diff < 3600) return `${Math.floor(diff / 60)} 分钟前`
-  if (diff < 86400) return `${Math.floor(diff / 3600)} 小时前`
-  if (diff < 2592000) return `${Math.floor(diff / 86400)} 天前`
-  return new Date(dateStr).toLocaleDateString('zh-CN')
 }
 
 function getEventText(event) {
@@ -234,20 +225,37 @@ export default function Dashboard({ githubRepos, onSelectRepo, onNavigate }) {
       </div>
 
       {/* Stat cards */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12, marginBottom: 20 }}>
-        {statCards.map((s, i) => (
-          <div key={i} style={{ ...cardStyle, display: 'flex', alignItems: 'center', gap: 12 }}>
-            <div style={{
-              width: 40, height: 40, borderRadius: 10, background: `${s.color}12`,
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-            }}>{s.icon}</div>
-            <div>
-              <div style={{ fontSize: 20, fontWeight: 700, color: 'var(--mac-text)', lineHeight: 1 }}>{s.value}</div>
-              <div style={{ fontSize: 11, color: 'var(--mac-text-secondary)' }}>{s.label}</div>
+      {loading ? (
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12, marginBottom: 20 }}>
+          {[1,2,3,4].map(i => (
+            <div key={i} style={{ ...cardStyle, display: 'flex', alignItems: 'center', gap: 12 }}>
+              <div style={{
+                width: 40, height: 40, borderRadius: 10, background: 'var(--mac-border)',
+                animation: 'pulse-dot 1.5s infinite',
+              }} />
+              <div>
+                <div style={{ width: 36, height: 20, borderRadius: 4, background: 'var(--mac-border)', marginBottom: 6 }} />
+                <div style={{ width: 40, height: 10, borderRadius: 4, background: 'var(--mac-border)' }} />
+              </div>
             </div>
-          </div>
-        ))}
-      </div>
+          ))}
+        </div>
+      ) : (
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12, marginBottom: 20 }}>
+          {statCards.map((s, i) => (
+            <div key={i} style={{ ...cardStyle, display: 'flex', alignItems: 'center', gap: 12 }}>
+              <div style={{
+                width: 40, height: 40, borderRadius: 10, background: `${s.color}12`,
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+              }}>{s.icon}</div>
+              <div>
+                <div style={{ fontSize: 20, fontWeight: 700, color: 'var(--mac-text)', lineHeight: 1 }}>{s.value}</div>
+                <div style={{ fontSize: 11, color: 'var(--mac-text-secondary)' }}>{s.label}</div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
 
       {/* Two column layout */}
       <div style={{ display: 'grid', gridTemplateColumns: '1.5fr 1fr', gap: 16 }}>

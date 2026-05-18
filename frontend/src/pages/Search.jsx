@@ -255,14 +255,27 @@ export default function Search({ githubRepos, onSelectRepo }) {
         setResults(data?.items || data || [])
       } else if (searchType === 'commits') {
         const data = await api.get(`/api/github/search/commits?q=${encodeURIComponent(query)}`).catch(() => [])
-        setResults(data?.items || data || [])
+        // 后端返回 { total_count, items: [{ sha, sha_full, message, author, date, html_url }] }
+        // 前端 CommitResult 期望 { sha, commit: { message, author: { name, date } }, html_url }
+        const items = data?.items || data || []
+        setResults(items.map(i => ({
+          sha: i.sha_full || i.sha,
+          commit: {
+            message: i.message || '',
+            author: {
+              name: i.author || '',
+              date: i.date || '',
+            },
+          },
+          html_url: i.html_url,
+        })))
       } else if (searchType === 'users') {
         const data = await api.get(`/api/github/search/users?q=${encodeURIComponent(query)}`).catch(() => [])
         setResults(data?.items || data || [])
       } else {
         // API search for code
         const data = await api.get(`/api/github/search/code?q=${encodeURIComponent(query)}`).catch(() => [])
-        setResults(data || [])
+        setResults(data?.items || data || [])
       }
     } catch (err) {
       setResults([])

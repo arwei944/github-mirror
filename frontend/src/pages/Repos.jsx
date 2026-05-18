@@ -1,6 +1,7 @@
 import { useState, useMemo } from 'react'
 import { Icon } from '../App'
 import api from '../api'
+import { timeAgo } from '../utils/timeAgo'
 
 const LANG_COLORS = {
   Python: '#3572A5', JavaScript: '#f1e05a', TypeScript: '#3178c6', HTML: '#e34c26', CSS: '#563d7c',
@@ -9,16 +10,6 @@ const LANG_COLORS = {
   Dart: '#00B4AB', Vue: '#41b883', Svelte: '#ff3e00', Jupyter: '#DA5B0B', Lua: '#000080',
 }
 function langColor(lang) { return LANG_COLORS[lang] || '#86868b' }
-
-function timeAgo(dateStr) {
-  if (!dateStr) return ''
-  const diff = (Date.now() - new Date(dateStr).getTime()) / 1000
-  if (diff < 60) return '刚刚'
-  if (diff < 3600) return `${Math.floor(diff / 60)} 分钟前`
-  if (diff < 86400) return `${Math.floor(diff / 3600)} 小时前`
-  if (diff < 2592000) return `${Math.floor(diff / 86400)} 天前`
-  return new Date(dateStr).toLocaleDateString('zh-CN')
-}
 
 function StatusDot({ status }) {
   const cls = { success: 'status-running', running: 'status-building', error: 'status-error', skipped: 'status-idle', idle: 'status-idle' }

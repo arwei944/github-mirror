@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { Icon } from '../App'
 import api from '../api'
+import { timeAgo } from '../utils/timeAgo'
 
 // ============ 工具定义 ============
 
@@ -99,16 +100,6 @@ const TOOL_GROUPS = [
 const TOTAL_TOOLS = TOOL_GROUPS.reduce((sum, g) => sum + g.tools.length, 0)
 
 // ============ 辅助函数 ============
-
-function timeAgo(dateStr) {
-  if (!dateStr) return ''
-  const diff = (Date.now() - new Date(dateStr).getTime()) / 1000
-  if (diff < 60) return '刚刚'
-  if (diff < 3600) return `${Math.floor(diff / 60)} 分钟前`
-  if (diff < 86400) return `${Math.floor(diff / 3600)} 小时前`
-  if (diff < 2592000) return `${Math.floor(diff / 86400)} 天前`
-  return new Date(dateStr).toLocaleDateString('zh-CN')
-}
 
 function truncate(str, len = 80) {
   if (!str) return '-'
@@ -398,7 +389,7 @@ export default function McpService() {
             background: 'var(--mac-bg)', padding: '1px 6px', borderRadius: 8,
           }}>{TOTAL_TOOLS} 个</span>
         </div>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(440px, 1fr))', gap: 16 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(440px, 1fr))', gap: 16, maxHeight: 600, overflowY: 'auto', maskImage: 'linear-gradient(to bottom, black 90%, transparent 100%)', WebkitMaskImage: 'linear-gradient(to bottom, black 90%, transparent 100%)' }}>
           {TOOL_GROUPS.map(group => (
             <ToolGroupCard key={group.key} group={group} />
           ))}

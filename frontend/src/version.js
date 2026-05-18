@@ -1,2 +1,25 @@
 // 版本号统一管理 - 修改版本时只需改这里
-export const APP_VERSION = 'v6.2.1'
+export const APP_VERSION = 'v6.3.0'
+
+// 版本历史（仅版本号和日期，详细变更记录在 About.jsx 中维护）
+export const VERSION_HISTORY = [
+  { version: 'v6.3.0', date: '2026-05-18' },
+  { version: 'v6.2.1', date: '2026-05-18' },
+  { version: 'v6.2.0', date: '2026-05-18' },
+  { version: 'v6.1.0', date: '2026-05-18' },
+  { version: 'v6.0.0', date: '2026-05-18' },
+  { version: 'v5.5.0', date: '2026-05-18' },
+  { version: 'v5.4.5', date: '2026-05-10' },
+  { version: 'v5.4.4', date: '2026-05-10' },
+  { version: 'v5.4.3', date: '2026-05-10' },
+  { version: 'v5.4.2', date: '2026-05-09' },
+  { version: 'v5.4.0', date: '2026-05-09' },
+  { version: 'v5.3.0', date: '2026-05-08' },
+  { version: 'v5.2.0', date: '2026-05-05' },
+  { version: 'v5.1.0', date: '2026-05-01' },
+  { version: 'v5.0.0', date: '2026-04-25' },
+  { version: 'v4.0.0', date: '2026-04-15' },
+  { version: 'v3.0.0', date: '2026-04-01' },
+  { version: 'v2.0.0', date: '2026-03-15' },
+  { version: 'v1.0.0', date: '2026-03-01' },
+]

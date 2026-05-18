@@ -4,6 +4,20 @@ import { APP_VERSION } from '../version'
 
 const versions = [
   {
+    version: 'v6.3.0',
+    date: '2026-05-18',
+    changes: [
+      '搜索功能修复（仓库搜索对接 GitHub Search API）',
+      '搜索结果 commits/code 数据结构适配',
+      '仪表盘统计卡片骨架屏（loading 状态）',
+      'MCP 工具列表滚动指示（底部渐变遮罩）',
+      'timeAgo 函数统一迁移至 utils/（15 个文件）',
+      'GlobalSettings 版本历史与 About 同步',
+      '仓库详情 API 支持 owner/repo 格式',
+      '后端新增 /api/github/search 通用搜索入口',
+    ],
+  },
+  {
     version: 'v6.2.1',
     date: '2026-05-18',
     changes: [

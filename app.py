@@ -37,7 +37,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 
-__version__ = "6.2.1"
+__version__ = "6.3.0"
 
 app = FastAPI(
     version=__version__,
@@ -448,12 +448,13 @@ async def get_repo_detail(repo_name: str):
         raise HTTPException(status_code=500, detail="未配置 GITHUB_TOKEN 环境变量")
 
     # 并行获取各项数据
-    repo_path = f"/repos/{GITHUB_USER}/{repo_name}"
-    readme_path = f"/repos/{GITHUB_USER}/{repo_name}/readme"
-    commits_path = f"/repos/{GITHUB_USER}/{repo_name}/commits?per_page=15"
-    branches_path = f"/repos/{GITHUB_USER}/{repo_name}/branches"
-    contributors_path = f"/repos/{GITHUB_USER}/{repo_name}/contributors?per_page=10"
-    languages_path = f"/repos/{GITHUB_USER}/{repo_name}/languages"
+    full_repo = repo_name if "/" in repo_name else f"{GITHUB_USER}/{repo_name}"
+    repo_path = f"/repos/{full_repo}"
+    readme_path = f"/repos/{full_repo}/readme"
+    commits_path = f"/repos/{full_repo}/commits?per_page=15"
+    branches_path = f"/repos/{full_repo}/branches"
+    contributors_path = f"/repos/{full_repo}/contributors?per_page=10"
+    languages_path = f"/repos/{full_repo}/languages"
 
     status, repo_data = github_api_get(repo_path)
     if status != 200:
@@ -2537,6 +2538,12 @@ async def search_code(q: str = Query(..., description="搜索关键词"), per_pa
         raise HTTPException(status_code=status, detail=f"搜索失败: {data}")
     items = data.get("items", []) if isinstance(data, dict) else []
     return {"total_count": data.get("total_count", 0), "items": [{"name": i.get("name", ""), "path": i.get("path", ""), "repository": {"full_name": i.get("repository", {}).get("full_name", ""), "name": i.get("repository", {}).get("name", "")}, "html_url": i.get("html_url", "")} for i in items]}
+
+
+@app.get("/api/github/search")
+async def search_github(q: str = Query(..., description="搜索关键词"), per_page: int = Query(30, ge=1, le=100)):
+    """通用搜索入口 - 默认搜索仓库（向后兼容 /api/github/search/repositories）"""
+    return await search_repositories(q=q, per_page=per_page)
 
 
 @app.get("/api/github/search/repositories")

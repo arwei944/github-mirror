@@ -1,19 +1,20 @@
 import { useState, useEffect } from 'react'
 import { Icon } from '../App'
 import api from '../api'
-import { APP_VERSION } from '../version'
+import { APP_VERSION, VERSION_HISTORY } from '../version'
+import { timeAgo } from '../utils/timeAgo'
 
-// 版本历史
-const VERSION_HISTORY = [
-  { version: APP_VERSION, date: '2026-05-18', changes: ['仪表盘智能轮询（60秒 + 页面可见性检测）', '版本号统一管理（version.js）', '一键复制项目名', '仓库文件同步功能', '修复项目详情页空白问题'] },
-  { version: 'v6.0.0', date: '2026-05-18', changes: ['MCP 服务端（SSE 传输协议，30 个工具）', 'Shell 命令执行工具（安全限制 + 超时控制）', 'HTTP 代理工具（URL 黑名单防护）', 'MCP 服务展示页面（工具列表 + 调用历史）', 'MCP 工具调用活动流集成', '侧边栏分组 Tab 页导航重构', '关于页面（项目介绍 + 版本变更）', '环境变量管理页面', '活动流自动刷新修复'] },
-  { version: 'v5.5.0', date: '2026-05-18', changes: ['新增 MCP 服务端（SSE 传输协议）', '新增 Shell 命令执行工具', '新增 HTTP 代理工具', '侧边栏分组优化', '新增关于页面'] },
-  { version: 'v5.4.5', date: '2026-05-10', changes: ['多仓库活动聚合 API', 'HF Space 部署状态 API', 'Webhook 接收器', 'GitHub/HF Webhook 支持'] },
-  { version: 'v5.4.4', date: '2026-05-10', changes: ['修复最近活动显示问题', '修复提交记录显示问题'] },
-  { version: 'v5.4.3', date: '2026-05-10', changes: ['修复 API 返回值顺序错误', '修复 params 参数错误'] },
-  { version: 'v5.4.2', date: '2026-05-09', changes: ['优化仪表盘显示', '修复收藏项目显示'] },
-  { version: 'v5.4.0', date: '2026-05-09', changes: ['全新 UI 设计', 'Mac 风格界面', '暗色/亮色主题'] },
-]
+// 版本详细变更记录（仅 GlobalSettings 的版本记录 Tab 使用）
+const VERSION_CHANGES = {
+  'v6.2.1': ['仪表盘智能轮询（60秒 + 页面可见性检测）', '版本号统一管理（version.js）', '一键复制项目名', '仓库文件同步功能', '修复项目详情页空白问题'],
+  'v6.0.0': ['MCP 服务端（SSE 传输协议，30 个工具）', 'Shell 命令执行工具（安全限制 + 超时控制）', 'HTTP 代理工具（URL 黑名单防护）', 'MCP 服务展示页面（工具列表 + 调用历史）', 'MCP 工具调用活动流集成', '侧边栏分组 Tab 页导航重构', '关于页面（项目介绍 + 版本变更）', '环境变量管理页面', '活动流自动刷新修复'],
+  'v5.5.0': ['新增 MCP 服务端（SSE 传输协议）', '新增 Shell 命令执行工具', '新增 HTTP 代理工具', '侧边栏分组优化', '新增关于页面'],
+  'v5.4.5': ['多仓库活动聚合 API', 'HF Space 部署状态 API', 'Webhook 接收器', 'GitHub/HF Webhook 支持'],
+  'v5.4.4': ['修复最近活动显示问题', '修复提交记录显示问题'],
+  'v5.4.3': ['修复 API 返回值顺序错误', '修复 params 参数错误'],
+  'v5.4.2': ['优化仪表盘显示', '修复收藏项目显示'],
+  'v5.4.0': ['全新 UI 设计', 'Mac 风格界面', '暗色/亮色主题'],
+}
 
 // 技术栈
 const TECH_STACK = [
@@ -38,16 +39,6 @@ const TECH_STACK = [
     { name: 'HuggingFace Hub API', desc: 'Space 管理' },
   ]},
 ]
-
-function timeAgo(dateStr) {
-  if (!dateStr) return ''
-  const diff = (Date.now() - new Date(dateStr).getTime()) / 1000
-  if (diff < 60) return '刚刚'
-  if (diff < 3600) return `${Math.floor(diff / 60)} 分钟前`
-  if (diff < 86400) return `${Math.floor(diff / 3600)} 小时前`
-  if (diff < 2592000) return `${Math.floor(diff / 86400)} 天前`
-  return new Date(dateStr).toLocaleDateString('zh-CN')
-}
 
 // 应用配置 Tab
 function AppConfigTab() {
@@ -549,7 +540,7 @@ function VersionTab() {
             )}
           </div>
           <ul style={{ margin: 0, paddingLeft: 20, display: 'flex', flexDirection: 'column', gap: 4 }}>
-            {v.changes.map((change, j) => (
+            {(VERSION_CHANGES[v.version] || []).map((change, j) => (
               <li key={j} style={{ fontSize: 12, color: 'var(--mac-text)' }}>
                 {change}
               </li>
