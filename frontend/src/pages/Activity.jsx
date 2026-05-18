@@ -23,6 +23,9 @@ const EVENT_TYPES = [
   { key: 'CreateEvent', label: '创建' },
   { key: 'DeleteEvent', label: '删除' },
   { key: 'PublicEvent', label: '公开' },
+  { key: 'McpToolCallEvent', label: 'MCP 工具' },
+  { key: 'McpShellEvent', label: 'Shell 命令' },
+  { key: 'McpProxyEvent', label: 'HTTP 代理' },
 ]
 
 const EVENT_COLORS = {
@@ -35,6 +38,9 @@ const EVENT_COLORS = {
   CreateEvent: { bg: 'rgba(52,199,89,0.1)', color: 'var(--mac-green)' },
   DeleteEvent: { bg: 'rgba(255,59,48,0.1)', color: 'var(--mac-red)' },
   PublicEvent: { bg: 'rgba(52,199,89,0.1)', color: 'var(--mac-green)' },
+  McpToolCallEvent: { bg: 'rgba(175,82,222,0.1)', color: '#af52de' },
+  McpShellEvent: { bg: 'rgba(255,149,0,0.1)', color: 'var(--mac-orange)' },
+  McpProxyEvent: { bg: 'rgba(0,199,190,0.1)', color: '#00c7be' },
 }
 
 function getEventIcon(type) {
@@ -48,6 +54,12 @@ function getEventIcon(type) {
     case 'CreateEvent': return Icon.create(16)
     case 'DeleteEvent': return Icon.delete(16)
     case 'PublicEvent': return Icon.public(16)
+    case 'McpToolCallEvent':
+      return <svg width={16} height={16} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path d="M14.7 6.3a1 1 0 000 1.4l1.6 1.6a1 1 0 001.4 0l3.77-3.77a6 6 0 01-7.94 7.94l-6.91 6.91a2.12 2.12 0 01-3-3l6.91-6.91a6 6 0 017.94-7.94l-3.76 3.76z"/></svg>
+    case 'McpShellEvent':
+      return <svg width={16} height={16} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
+    case 'McpProxyEvent':
+      return <svg width={16} height={16} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 014 10 15.3 15.3 0 01-4 10 15.3 15.3 0 01-4-10 15.3 15.3 0 014-10z"/></svg>
     default: return Icon.activity(16)
   }
 }
@@ -115,7 +127,7 @@ export default function Activity({ activities, onSelectRepo }) {
 
   useEffect(() => {
     const t = setInterval(() => {
-      api.get('/api/github/events').then(data => {
+      api.get('/api/github/activity/aggregated').then(data => {
         if (data) setLocalActivities(data)
       }).catch(() => {})
     }, 30000)

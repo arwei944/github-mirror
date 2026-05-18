@@ -27,6 +27,9 @@ const Security = lazy(() => import('./pages/Security'))
 const Discussions = lazy(() => import('./pages/Discussions'))
 const Analytics = lazy(() => import('./pages/Analytics'))
 const Starred = lazy(() => import('./pages/Starred'))
+const EnvVars = lazy(() => import('./pages/EnvVars'))
+const About = lazy(() => import('./pages/About'))
+const McpService = lazy(() => import('./pages/McpService'))
 
 // ============ Icons ============
 const Icon = {
@@ -117,6 +120,12 @@ const Icon = {
   tag: (s = 14) => (
     <svg width={s} height={s} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path d="M20.59 13.41l-7.17 7.17a2 2 0 01-2.83 0L2 12V2h10l8.59 8.59a2 2 0 010 2.82z"/><line x1="7" y1="7" x2="7.01" y2="7"/></svg>
   ),
+  key: (s = 14) => (
+    <svg width={s} height={s} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 11-7.778 7.778 5.5 5.5 0 017.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/></svg>
+  ),
+  keyRound: (s = 14) => (
+    <svg width={s} height={s} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 11-7.778 7.778 5.5 5.5 0 017.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/></svg>
+  ),
   sun: (s = 16) => (
     <svg width={s} height={s} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><circle cx="12" cy="12" r="5"/><path d="M12 1v2m0 18v2M4.22 4.22l1.42 1.42m12.72 12.72l1.42 1.42M1 12h2m18 0h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>
   ),
@@ -135,12 +144,16 @@ const Icon = {
   link: (s = 14) => (
     <svg width={s} height={s} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path d="M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71"/></svg>
   ),
+  info: (s = 14) => (
+    <svg width={s} height={s} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><circle cx="12" cy="12" r="10"/><path d="M12 16v-4m0-4h.01"/></svg>
+  ),
 }
 
 export { Icon }
 
 // ============ Main App ============
 export default function App() {
+  const [currentGroup, setCurrentGroup] = useState('core')
   const [currentPage, setCurrentPage] = useState('dashboard')
   const [selectedRepo, setSelectedRepo] = useState(null)
   const [selectedIssue, setSelectedIssue] = useState(null)
@@ -247,6 +260,13 @@ export default function App() {
     setSelectedRepo(null)
     setSelectedIssue(null)
     setSelectedPull(null)
+    // 根据 page 找到对应的 group
+    for (const [group, tabs] of Object.entries(groupTabs)) {
+      if (tabs.some(t => t.key === page)) {
+        setCurrentGroup(group)
+        break
+      }
+    }
     setCurrentPage(page)
     setSidebarOpen(false)
     if (page === 'activity') {
@@ -256,23 +276,40 @@ export default function App() {
   }
 
   const navItems = [
-    { key: 'dashboard', label: '仪表盘', icon: Icon.dashboard(16) },
-    { key: 'repos', label: '仓库', icon: Icon.github(16) },
-    { key: 'starred', label: '星标项目', icon: Icon.star(16) },
-    { key: 'issues', label: 'Issues', icon: Icon.issue(16) },
-    { key: 'pulls', label: 'Pull Requests', icon: Icon.pr(16) },
-    { key: 'actions', label: 'Actions', icon: Icon.zap(16) },
-    { key: 'code', label: '代码浏览', icon: Icon.code(16) },
-    { key: 'search', label: '搜索', icon: Icon.search(16) },
-    { key: 'discussions', label: '讨论区', icon: Icon.messageCircle(16) },
-    { key: 'profile', label: '个人中心', icon: Icon.users(16) },
-    { key: 'settings', label: '仓库设置', icon: Icon.settings(16) },
-    { key: 'global-settings', label: '全局设置', icon: Icon.settings(16) },
-    { key: 'activity', label: '活动流', icon: Icon.activity(16), badge: unreadCount },
-    { key: 'security', label: '安全中心', icon: Icon.zap(16) },
-    { key: 'analytics', label: '数据分析', icon: Icon.barChart(16) },
-    { key: 'deploy', label: '部署管理', icon: Icon.deploy(16) },
+    { key: 'core', label: '核心功能', icon: Icon.dashboard(16) },
+    { key: 'collab', label: '协作', icon: Icon.issue(16) },
+    { key: 'ops', label: '运维', icon: Icon.zap(16) },
+    { key: 'system', label: '系统', icon: Icon.settings(16) },
   ]
+
+  const groupTabs = {
+    core: [
+      { key: 'dashboard', label: '仪表盘', icon: Icon.dashboard(14) },
+      { key: 'repos', label: '仓库', icon: Icon.github(14) },
+      { key: 'starred', label: '星标项目', icon: Icon.star(14) },
+      { key: 'search', label: '搜索', icon: Icon.search(14) },
+    ],
+    collab: [
+      { key: 'issues', label: 'Issues', icon: Icon.issue(14) },
+      { key: 'pulls', label: 'Pull Requests', icon: Icon.pr(14) },
+      { key: 'discussions', label: '讨论区', icon: Icon.messageCircle(14) },
+      { key: 'activity', label: '活动流', icon: Icon.activity(14) },
+    ],
+    ops: [
+      { key: 'actions', label: 'Actions', icon: Icon.zap(14) },
+      { key: 'code', label: '代码浏览', icon: Icon.code(14) },
+      { key: 'deploy', label: '部署管理', icon: Icon.deploy(14) },
+      { key: 'security', label: '安全中心', icon: Icon.zap(14) },
+      { key: 'analytics', label: '数据分析', icon: Icon.barChart(14) },
+      { key: 'mcp-service', label: 'MCP 服务', icon: Icon.zap(14) },
+    ],
+    system: [
+      { key: 'settings', label: '仓库设置', icon: Icon.settings(14) },
+      { key: 'global-settings', label: '全局设置', icon: Icon.settings(14) },
+      { key: 'env-vars', label: '环境变量', icon: Icon.keyRound(14) },
+      { key: 'about', label: '关于', icon: Icon.info(14) },
+    ],
+  }
 
   // Keyboard shortcuts
   useKeyboardShortcuts({
@@ -323,182 +360,129 @@ export default function App() {
   }, [])
 
   const renderContent = () => {
-    // Detail pages (with back navigation)
-    if (currentPage === 'detail' && selectedRepo) {
+    // 详情页（不受 Tab 影响）
+    if (currentPage === 'repo-detail') {
       return (
         <ErrorBoundary>
-          <Suspense fallback={<SkeletonLoader page="detail" />}>
-            <RepoDetail
-              repoName={selectedRepo}
-              projects={projects}
-              hfSpaces={hfSpaces}
-              onBack={handleBack}
-              onRefresh={loadAll}
-            />
+          <Suspense fallback={<SkeletonLoader />}>
+            <RepoDetail repo={selectedRepo} onNavigate={navigateTo} />
           </Suspense>
         </ErrorBoundary>
       )
     }
-    if (currentPage === 'issue-detail' && selectedRepo && selectedIssue) {
+    if (currentPage === 'issue-detail') {
       return (
         <ErrorBoundary>
           <Suspense fallback={<SkeletonLoader />}>
-            <IssueDetail
-              repoName={selectedRepo}
-              issueNumber={selectedIssue}
-              onBack={handleIssueBack}
-            />
+            <IssueDetail repo={selectedRepo} issueNumber={selectedIssue} onNavigate={navigateTo} />
           </Suspense>
         </ErrorBoundary>
       )
     }
-    if (currentPage === 'pull-detail' && selectedRepo && selectedPull) {
+    if (currentPage === 'pull-detail') {
       return (
         <ErrorBoundary>
           <Suspense fallback={<SkeletonLoader />}>
-            <PullDetail
-              repoName={selectedRepo}
-              pullNumber={selectedPull}
-              onBack={handlePullBack}
-            />
+            <PullDetail repo={selectedRepo} pullNumber={selectedPull} onNavigate={navigateTo} />
           </Suspense>
         </ErrorBoundary>
       )
     }
 
-    // Main pages
-    switch (currentPage) {
-      case 'dashboard':
-        return (
-          <ErrorBoundary>
-            <Suspense fallback={<SkeletonLoader />}>
-              <Dashboard githubRepos={githubRepos} onSelectRepo={handleSelectRepo} onNavigate={navigateTo} />
-            </Suspense>
-          </ErrorBoundary>
-        )
-      case 'starred':
-        return (
-          <ErrorBoundary>
-            <Suspense fallback={<SkeletonLoader />}>
-              <Starred onSelectRepo={handleSelectRepo} />
-            </Suspense>
-          </ErrorBoundary>
-        )
-      case 'repos':
-        return (
-          <ErrorBoundary>
-            <Suspense fallback={<SkeletonLoader page="repos" />}>
-              <Repos githubRepos={githubRepos} projects={projects} hfSpaces={hfSpaces} onSelectRepo={handleSelectRepo} />
-            </Suspense>
-          </ErrorBoundary>
-        )
-      case 'issues':
-        return (
-          <ErrorBoundary>
-            <Suspense fallback={<SkeletonLoader />}>
-              <Issues githubRepos={githubRepos} onSelectIssue={handleSelectIssue} />
-            </Suspense>
-          </ErrorBoundary>
-        )
-      case 'pulls':
-        return (
-          <ErrorBoundary>
-            <Suspense fallback={<SkeletonLoader />}>
-              <Pulls githubRepos={githubRepos} onSelectPull={handleSelectPull} />
-            </Suspense>
-          </ErrorBoundary>
-        )
-      case 'actions':
-        return (
-          <ErrorBoundary>
-            <Suspense fallback={<SkeletonLoader />}>
-              <Actions githubRepos={githubRepos} />
-            </Suspense>
-          </ErrorBoundary>
-        )
-      case 'code':
-        return (
-          <ErrorBoundary>
-            <Suspense fallback={<SkeletonLoader />}>
-              <CodeBrowse githubRepos={githubRepos} />
-            </Suspense>
-          </ErrorBoundary>
-        )
-      case 'search':
-        return (
-          <ErrorBoundary>
-            <Suspense fallback={<SkeletonLoader />}>
-              <Search githubRepos={githubRepos} onSelectRepo={handleSelectRepo} />
-            </Suspense>
-          </ErrorBoundary>
-        )
-      case 'discussions':
-        return (
-          <ErrorBoundary>
-            <Suspense fallback={<SkeletonLoader />}>
-              <Discussions githubRepos={githubRepos} />
-            </Suspense>
-          </ErrorBoundary>
-        )
-      case 'profile':
-        return (
-          <ErrorBoundary>
-            <Suspense fallback={<SkeletonLoader />}>
-              <Profile />
-            </Suspense>
-          </ErrorBoundary>
-        )
-      case 'settings':
-        return (
-          <ErrorBoundary>
-            <Suspense fallback={<SkeletonLoader />}>
-              <Settings githubRepos={githubRepos} />
-            </Suspense>
-          </ErrorBoundary>
-        )
-      case 'global-settings':
-        return (
-          <ErrorBoundary>
-            <Suspense fallback={<SkeletonLoader />}>
-              <GlobalSettings />
-            </Suspense>
-          </ErrorBoundary>
-        )
-      case 'activity':
-        return (
-          <ErrorBoundary>
-            <Suspense fallback={<SkeletonLoader />}>
-              <Activity activities={activities} onSelectRepo={handleSelectRepo} />
-            </Suspense>
-          </ErrorBoundary>
-        )
-      case 'security':
-        return (
-          <ErrorBoundary>
-            <Suspense fallback={<SkeletonLoader />}>
-              <Security githubRepos={githubRepos} />
-            </Suspense>
-          </ErrorBoundary>
-        )
-      case 'analytics':
-        return (
-          <ErrorBoundary>
-            <Suspense fallback={<SkeletonLoader />}>
-              <Analytics githubRepos={githubRepos} />
-            </Suspense>
-          </ErrorBoundary>
-        )
-      case 'deploy':
-        return (
-          <ErrorBoundary>
-            <Suspense fallback={<SkeletonLoader />}>
-              <Deploy githubRepos={githubRepos} projects={projects} hfSpaces={hfSpaces} onRefresh={loadAll} />
-            </Suspense>
-          </ErrorBoundary>
-        )
-      default:
-        return null
+    // 获取当前分组的 tabs
+    const tabs = groupTabs[currentGroup] || []
+
+    // 渲染页面内容
+    const renderPage = (page) => {
+      switch (page) {
+        case 'dashboard':
+          return <Dashboard githubRepos={githubRepos} onSelectRepo={handleSelectRepo} onNavigate={navigateTo} />
+        case 'starred':
+          return <Starred onSelectRepo={handleSelectRepo} />
+        case 'repos':
+          return <Repos githubRepos={githubRepos} projects={projects} hfSpaces={hfSpaces} onSelectRepo={handleSelectRepo} />
+        case 'issues':
+          return <Issues githubRepos={githubRepos} onSelectIssue={handleSelectIssue} />
+        case 'pulls':
+          return <Pulls githubRepos={githubRepos} onSelectPull={handleSelectPull} />
+        case 'actions':
+          return <Actions githubRepos={githubRepos} />
+        case 'code':
+          return <CodeBrowse githubRepos={githubRepos} />
+        case 'search':
+          return <Search githubRepos={githubRepos} onSelectRepo={handleSelectRepo} />
+        case 'discussions':
+          return <Discussions githubRepos={githubRepos} />
+        case 'profile':
+          return <Profile />
+        case 'settings':
+          return <Settings githubRepos={githubRepos} />
+        case 'global-settings':
+          return <GlobalSettings />
+        case 'activity':
+          return <Activity activities={activities} onSelectRepo={handleSelectRepo} />
+        case 'security':
+          return <Security githubRepos={githubRepos} />
+        case 'analytics':
+          return <Analytics githubRepos={githubRepos} />
+        case 'mcp-service':
+          return <McpService />
+        case 'deploy':
+          return <Deploy githubRepos={githubRepos} projects={projects} hfSpaces={hfSpaces} onRefresh={loadAll} />
+        case 'env-vars':
+          return <EnvVars />
+        case 'about':
+          return <About />
+        default:
+          return null
+      }
     }
+
+    return (
+      <div>
+        {/* Tab 栏 */}
+        {tabs.length > 1 && (
+          <div style={{
+            display: 'flex', gap: 2, padding: '12px 24px 0',
+            borderBottom: '1px solid var(--mac-border)',
+            overflowX: 'auto',
+          }}>
+            {tabs.map(tab => (
+              <button
+                key={tab.key}
+                onClick={() => setCurrentPage(tab.key)}
+                style={{
+                  padding: '8px 16px',
+                  fontSize: 13,
+                  fontWeight: currentPage === tab.key ? 600 : 400,
+                  color: currentPage === tab.key ? 'var(--mac-accent)' : 'var(--mac-text-secondary)',
+                  background: 'none',
+                  border: 'none',
+                  borderBottom: currentPage === tab.key ? '2px solid var(--mac-accent)' : '2px solid transparent',
+                  cursor: 'pointer',
+                  whiteSpace: 'nowrap',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  transition: 'all 0.15s',
+                }}
+              >
+                {tab.icon}
+                {tab.label}
+              </button>
+            ))}
+          </div>
+        )}
+        {/* 页面内容 */}
+        <div>
+          <ErrorBoundary>
+            <Suspense fallback={<SkeletonLoader />}>
+              {renderPage(currentPage)}
+            </Suspense>
+          </ErrorBoundary>
+        </div>
+      </div>
+    )
   }
 
   return (
@@ -507,7 +491,7 @@ export default function App() {
       <div className="mobile-header">
         <HamburgerMenu isOpen={sidebarOpen} onClick={() => setSidebarOpen(prev => !prev)} />
         <span style={{ fontSize: 15, fontWeight: 600, letterSpacing: '-0.02em' }}>GitHub Mirror</span>
-        <span style={{ fontSize: 9, padding: '1px 6px', borderRadius: 8, background: 'var(--mac-accent)', color: 'white', fontWeight: 500 }}>v5.4.5</span>
+        <span style={{ fontSize: 9, padding: '1px 6px', borderRadius: 8, background: 'var(--mac-accent)', color: 'white', fontWeight: 500 }}>v6.0.0</span>
       </div>
 
       {/* Mobile sidebar overlay */}
@@ -522,7 +506,7 @@ export default function App() {
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <span style={{ color: 'var(--mac-text)' }}>{Icon.github(18)}</span>
             <span className="sidebar-title" style={{ fontSize: 15, fontWeight: 600, letterSpacing: '-0.02em' }}>GitHub Mirror</span>
-            <span className="sidebar-version" style={{ fontSize: 9, padding: '1px 6px', borderRadius: 8, background: 'var(--mac-accent)', color: 'white', fontWeight: 500 }}>v5.4.6</span>
+            <span className="sidebar-version" style={{ fontSize: 9, padding: '1px 6px', borderRadius: 8, background: 'var(--mac-accent)', color: 'white', fontWeight: 500 }}>v6.0.0</span>
           </div>
           {/* Theme toggle */}
           <button
@@ -539,23 +523,20 @@ export default function App() {
           {navItems.map(item => (
             <div
               key={item.key}
-              className={`nav-item ${currentPage === item.key || (item.key === 'issues' && currentPage === 'issue-detail') || (item.key === 'pulls' && currentPage === 'pull-detail') ? 'active' : ''}`}
-              onClick={() => navigateTo(item.key)}
+              className={`nav-item ${currentGroup === item.key ? 'active' : ''}`}
+              onClick={() => {
+                setCurrentGroup(item.key)
+                // 切换到该分组的第一个 tab
+                const tabs = groupTabs[item.key]
+                if (tabs && tabs.length > 0) {
+                  setCurrentPage(tabs[0].key)
+                }
+                setSidebarOpen(false)
+              }}
               title={item.label}
-              style={{ position: 'relative' }}
             >
               {item.icon}
               <span className="nav-label">{item.label}</span>
-              {item.badge > 0 && (
-                <span style={{
-                  position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)',
-                  background: '#ff3b30', color: 'white', fontSize: 9, fontWeight: 600,
-                  minWidth: 16, height: 16, borderRadius: 8, display: 'flex',
-                  alignItems: 'center', justifyContent: 'center', padding: '0 4px',
-                }}>
-                  {item.badge > 99 ? '99+' : item.badge}
-                </span>
-              )}
             </div>
           ))}
         </nav>
@@ -575,7 +556,7 @@ export default function App() {
 
       {/* Command Palette */}
       <CommandPalette
-        navItems={navItems}
+        navItems={Object.values(groupTabs).flat()}
         onNavigate={navigateTo}
         isOpen={commandPaletteOpen}
         onClose={() => setCommandPaletteOpen(false)}

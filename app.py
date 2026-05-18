@@ -20,7 +20,7 @@ from fastapi import FastAPI, Query, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 
-__version__ = "5.4.2"
+__version__ = "6.0.0"
 
 app = FastAPI(
     version=__version__,
@@ -468,6 +468,9 @@ EVENT_TYPE_LABELS = {
     "WatchEvent": "关注仓库",
     "ForkEvent": "Fork 仓库",
     "PublicEvent": "公开仓库",
+    "McpToolCallEvent": "MCP 工具调用",
+    "McpShellEvent": "Shell 命令执行",
+    "McpProxyEvent": "HTTP 代理请求",
 }
 
 
@@ -708,7 +711,26 @@ async def get_aggregated_activity(
                         all_events.append(enrich_event(fake_event))
                         seen_ids.add(event_id)
 
-    # 4. 按时间排序
+    # 4. 合并 MCP 工具调用事件
+    mcp_events = []
+    for call in _mcp_tool_calls[:20]:
+        mcp_events.append({
+            "id": call["id"],
+            "type": call["type"],
+            "type_label": call["type_label"],
+            "repo_name": call.get("repo_name", ""),
+            "full_repo_name": call.get("full_repo_name", ""),
+            "created_at": call["created_at"],
+            "action": call["action"],
+            "detail": call["detail"],
+            "url": "",
+            "source": "mcp",
+            "tool_name": call.get("tool_name", ""),
+            "is_error": call.get("is_error", False),
+        })
+    all_events.extend(mcp_events)
+
+    # 5. 按时间排序
     all_events.sort(key=lambda x: x.get("created_at", ""), reverse=True)
 
     return all_events[:per_page]
@@ -777,11 +799,16 @@ async def get_hf_space_logs(space_id: str, lines: int = Query(100, ge=1, le=1000
 _webhook_events: list = []
 _WEBHOOK_MAX_EVENTS = 100
 
+# MCP 工具调用历史
+_mcp_tool_calls: list = []
+_MCP_TOOL_CALLS_MAX = 200
+
 
 @app.post("/api/webhooks/github")
 async def github_webhook(request: Request):
     """
     接收 GitHub Webhook 事件 (v5.4.5)
+    支持自动部署：当收到 push 事件时，检查对应项目是否开启自动部署
     """
     import json
     
@@ -790,12 +817,18 @@ async def github_webhook(request: Request):
         payload = json.loads(body)
         event_type = request.headers.get("X-GitHub-Event", "unknown")
         
+        # 获取仓库信息
+        repo_full_name = payload.get("repository", {}).get("full_name", "")
+        ref = payload.get("ref", "")
+        branch = ref.replace("refs/heads/", "") if ref else ""
+        
         event = {
             "id": payload.get("action", "") + "-" + str(len(_webhook_events)),
             "source": "github",
             "type": event_type,
             "action": payload.get("action", ""),
-            "repo": payload.get("repository", {}).get("full_name", ""),
+            "repo": repo_full_name,
+            "branch": branch,
             "sender": payload.get("sender", {}).get("login", ""),
             "payload": payload,
             "received_at": datetime.now().isoformat(),
@@ -805,6 +838,46 @@ async def github_webhook(request: Request):
         _webhook_events.insert(0, event)
         if len(_webhook_events) > _WEBHOOK_MAX_EVENTS:
             _webhook_events.pop()
+        
+        # ──────────────────────────────────────────────
+        # 自动部署逻辑 (v6.0.0)
+        # ──────────────────────────────────────────────
+        if event_type == "push" and repo_full_name and branch:
+            # 查找匹配的项目
+            projects = load_projects()
+            for project_name, project in projects.items():
+                if project.get("github_repo") == repo_full_name and project.get("branch") == branch:
+                    if project.get("auto_deploy", False):
+                        # 检查项目状态，避免重复部署
+                        if project.get("status") != "deploying":
+                            print(f"[Webhook] 检测到 push 事件，自动触发部署: {project_name}")
+                            # 异步触发部署
+                            threading.Thread(
+                                target=run_deploy,
+                                args=(project_name, project),
+                                daemon=True
+                            ).start()
+                            return {
+                                "status": "received",
+                                "event_id": event["id"],
+                                "auto_deploy": True,
+                                "project": project_name,
+                                "message": f"自动部署已触发: {project_name}"
+                            }
+                        else:
+                            return {
+                                "status": "received",
+                                "event_id": event["id"],
+                                "auto_deploy": False,
+                                "message": f"项目 {project_name} 正在部署中，跳过"
+                            }
+                    else:
+                        return {
+                            "status": "received",
+                            "event_id": event["id"],
+                            "auto_deploy": False,
+                            "message": f"项目 {project_name} 未开启自动部署"
+                        }
         
         return {"status": "received", "event_id": event["id"]}
     except Exception as e:
@@ -849,6 +922,41 @@ async def get_webhook_events(per_page: int = Query(50, ge=1, le=100)):
     获取 Webhook 事件列表 (v5.4.5)
     """
     return _webhook_events[:per_page]
+
+
+@app.get("/api/mcp/tool-calls")
+async def get_mcp_tool_calls(
+    per_page: int = Query(50, ge=1, le=200),
+    tool_name: str = Query("", description="按工具名过滤"),
+):
+    """获取 MCP 工具调用历史"""
+    events = _mcp_tool_calls
+    if tool_name:
+        events = [e for e in events if e.get("tool_name") == tool_name]
+    return events[:per_page]
+
+
+@app.get("/api/mcp/tools")
+async def get_mcp_tools_info():
+    """获取 MCP 工具列表信息"""
+    groups = {}
+    tools = []
+    for t in MCP_TOOLS:
+        group = t.get("group", "other")
+        if group not in groups:
+            groups[group] = []
+        tool_info = {
+            "name": t["name"],
+            "description": t["description"],
+            "group": group,
+        }
+        groups[group].append(tool_info)
+        tools.append(tool_info)
+    return {
+        "total": len(MCP_TOOLS),
+        "groups": groups,
+        "tools": tools,
+    }
 
 
 @app.get("/api/config")
@@ -4298,6 +4406,998 @@ async def cache_stats():
         "entries": len(api_cache._cache),
         "config": CACHE_CONFIG,
     }
+
+
+# ──────────────────────────────────────────────
+# MCP Server - SSE Transport (v5.5.0)
+# ──────────────────────────────────────────────
+import asyncio
+import hashlib
+import re
+import uuid
+from collections import defaultdict
+from typing import Any, Dict, List
+
+from starlette.responses import StreamingResponse
+from starlette.types import Receive, Scope, Send
+
+
+# ── MCP 工具注册表 ──────────────────────────────
+
+MCP_TOOLS: List[Dict[str, Any]] = []
+
+def _register_tool(
+    name: str,
+    description: str,
+    parameters: Dict[str, Any],
+    group: str = "github",
+):
+    """注册一个 MCP 工具定义"""
+    MCP_TOOLS.append({
+        "name": name,
+        "description": description,
+        "inputSchema": {
+            "type": "object",
+            "properties": parameters,
+            "required": [k for k, v in parameters.items() if not v.get("optional", False)],
+        },
+        "group": group,
+    })
+
+def _tools_by_group(group: str) -> List[Dict[str, Any]]:
+    return [t for t in MCP_TOOLS if t["group"] == group]
+
+
+# ── GitHub 工具组 ──────────────────────────────
+
+_register_tool(
+    name="list_repos",
+    description="列出 GitHub 仓库列表，支持分页、排序和类型过滤",
+    group="github",
+    parameters={
+        "type": {"type": "string", "description": "仓库类型: all, owner, member", "default": "all", "optional": True},
+        "sort": {"type": "string", "description": "排序: updated, created, pushed, full_name", "default": "updated", "optional": True},
+        "per_page": {"type": "integer", "description": "每页数量 (1-100)", "default": 30, "optional": True},
+        "page": {"type": "integer", "description": "页码", "default": 1, "optional": True},
+    },
+)
+
+_register_tool(
+    name="get_repo_detail",
+    description="获取指定仓库的详细信息",
+    group="github",
+    parameters={
+        "repo_name": {"type": "string", "description": "仓库名称 (owner/repo 格式)"},
+    },
+)
+
+_register_tool(
+    name="create_repo",
+    description="创建新的 GitHub 仓库",
+    group="github",
+    parameters={
+        "name": {"type": "string", "description": "仓库名称"},
+        "description": {"type": "string", "description": "仓库描述", "optional": True},
+        "private": {"type": "boolean", "description": "是否私有", "default": False, "optional": True},
+        "auto_init": {"type": "boolean", "description": "是否自动初始化 README", "default": True, "optional": True},
+    },
+)
+
+_register_tool(
+    name="delete_repo",
+    description="删除指定的 GitHub 仓库",
+    group="github",
+    parameters={
+        "repo_name": {"type": "string", "description": "仓库名称 (owner/repo 格式)"},
+    },
+)
+
+_register_tool(
+    name="list_issues",
+    description="列出仓库的 Issues",
+    group="github",
+    parameters={
+        "repo_name": {"type": "string", "description": "仓库名称 (owner/repo 格式)"},
+        "state": {"type": "string", "description": "状态: open, closed, all", "default": "open", "optional": True},
+        "sort": {"type": "string", "description": "排序: created, updated, comments", "default": "created", "optional": True},
+        "per_page": {"type": "integer", "description": "每页数量", "default": 30, "optional": True},
+        "page": {"type": "integer", "description": "页码", "default": 1, "optional": True},
+    },
+)
+
+_register_tool(
+    name="create_issue",
+    description="创建新的 Issue",
+    group="github",
+    parameters={
+        "repo_name": {"type": "string", "description": "仓库名称 (owner/repo 格式)"},
+        "title": {"type": "string", "description": "Issue 标题"},
+        "body": {"type": "string", "description": "Issue 内容 (Markdown)", "optional": True},
+        "assignees": {"type": "array", "items": {"type": "string"}, "description": "指派人列表", "optional": True},
+        "labels": {"type": "array", "items": {"type": "string"}, "description": "标签列表", "optional": True},
+    },
+)
+
+_register_tool(
+    name="list_pulls",
+    description="列出仓库的 Pull Requests",
+    group="github",
+    parameters={
+        "repo_name": {"type": "string", "description": "仓库名称 (owner/repo 格式)"},
+        "state": {"type": "string", "description": "状态: open, closed, all", "default": "open", "optional": True},
+        "sort": {"type": "string", "description": "排序: created, updated, popularity", "default": "created", "optional": True},
+        "per_page": {"type": "integer", "description": "每页数量", "default": 30, "optional": True},
+        "page": {"type": "integer", "description": "页码", "default": 1, "optional": True},
+    },
+)
+
+_register_tool(
+    name="create_pr",
+    description="创建 Pull Request",
+    group="github",
+    parameters={
+        "repo_name": {"type": "string", "description": "仓库名称 (owner/repo 格式)"},
+        "title": {"type": "string", "description": "PR 标题"},
+        "body": {"type": "string", "description": "PR 描述 (Markdown)", "optional": True},
+        "head": {"type": "string", "description": "源分支"},
+        "base": {"type": "string", "description": "目标分支", "default": "main", "optional": True},
+    },
+)
+
+_register_tool(
+    name="merge_pr",
+    description="合并 Pull Request",
+    group="github",
+    parameters={
+        "repo_name": {"type": "string", "description": "仓库名称 (owner/repo 格式)"},
+        "pr_number": {"type": "integer", "description": "PR 编号"},
+        "commit_title": {"type": "string", "description": "合并提交标题", "optional": True},
+        "merge_method": {"type": "string", "description": "合并方式: merge, squash, rebase", "default": "merge", "optional": True},
+    },
+)
+
+_register_tool(
+    name="search_code",
+    description="在 GitHub 上搜索代码",
+    group="github",
+    parameters={
+        "q": {"type": "string", "description": "搜索查询 (例: className repo:owner/repo)"},
+        "per_page": {"type": "integer", "description": "每页数量", "default": 30, "optional": True},
+        "page": {"type": "integer", "description": "页码", "default": 1, "optional": True},
+    },
+)
+
+_register_tool(
+    name="search_repos",
+    description="在 GitHub 上搜索仓库",
+    group="github",
+    parameters={
+        "q": {"type": "string", "description": "搜索查询 (例: language:python stars:>100)"},
+        "sort": {"type": "string", "description": "排序: stars, forks, updated", "default": "stars", "optional": True},
+        "per_page": {"type": "integer", "description": "每页数量", "default": 30, "optional": True},
+        "page": {"type": "integer", "description": "页码", "default": 1, "optional": True},
+    },
+)
+
+_register_tool(
+    name="get_activity",
+    description="获取 GitHub 活动流",
+    group="github",
+    parameters={
+        "per_page": {"type": "integer", "description": "每页数量 (1-100)", "default": 30, "optional": True},
+    },
+)
+
+_register_tool(
+    name="get_user",
+    description="获取当前 GitHub 用户资料",
+    group="github",
+    parameters={},
+)
+
+_register_tool(
+    name="get_notifications",
+    description="获取 GitHub 通知列表",
+    group="github",
+    parameters={
+        "per_page": {"type": "integer", "description": "每页数量 (1-100)", "default": 20, "optional": True},
+    },
+)
+
+_register_tool(
+    name="get_repo_contents",
+    description="获取仓库文件/目录内容",
+    group="github",
+    parameters={
+        "repo_name": {"type": "string", "description": "仓库名称 (owner/repo 格式)"},
+        "path": {"type": "string", "description": "文件/目录路径", "default": "", "optional": True},
+    },
+)
+
+_register_tool(
+    name="get_commits",
+    description="获取仓库提交历史",
+    group="github",
+    parameters={
+        "repo_name": {"type": "string", "description": "仓库名称 (owner/repo 格式)"},
+        "branch": {"type": "string", "description": "分支名", "optional": True},
+        "per_page": {"type": "integer", "description": "每页数量", "default": 20, "optional": True},
+    },
+)
+
+_register_tool(
+    name="get_repo_tags",
+    description="获取仓库标签列表",
+    group="github",
+    parameters={
+        "repo_name": {"type": "string", "description": "仓库名称 (owner/repo 格式)"},
+        "per_page": {"type": "integer", "description": "每页数量", "default": 30, "optional": True},
+    },
+)
+
+_register_tool(
+    name="get_repo_branches",
+    description="获取仓库分支列表",
+    group="github",
+    parameters={
+        "repo_name": {"type": "string", "description": "仓库名称 (owner/repo 格式)"},
+    },
+)
+
+_register_tool(
+    name="get_repo_releases",
+    description="获取仓库发布版本列表",
+    group="github",
+    parameters={
+        "repo_name": {"type": "string", "description": "仓库名称 (owner/repo 格式)"},
+        "per_page": {"type": "integer", "description": "每页数量", "default": 10, "optional": True},
+    },
+)
+
+_register_tool(
+    name="get_repo_stargazers",
+    description="获取仓库 Star 用户列表",
+    group="github",
+    parameters={
+        "repo_name": {"type": "string", "description": "仓库名称 (owner/repo 格式)"},
+        "per_page": {"type": "integer", "description": "每页数量", "default": 30, "optional": True},
+    },
+)
+
+_register_tool(
+    name="fork_repo",
+    description="Fork 一个仓库",
+    group="github",
+    parameters={
+        "repo_name": {"type": "string", "description": "仓库名称 (owner/repo 格式)"},
+    },
+)
+
+
+# ── HF 工具组 ──────────────────────────────────
+
+_register_tool(
+    name="list_spaces",
+    description="列出 HuggingFace Spaces",
+    group="huggingface",
+    parameters={},
+)
+
+_register_tool(
+    name="get_space_status",
+    description="获取 HF Space 部署状态",
+    group="huggingface",
+    parameters={},
+)
+
+_register_tool(
+    name="get_space_logs",
+    description="获取 HF Space 日志",
+    group="huggingface",
+    parameters={
+        "space_id": {"type": "string", "description": "Space ID (例: user/space-name)"},
+        "lines": {"type": "integer", "description": "日志行数 (1-1000)", "default": 100, "optional": True},
+    },
+)
+
+
+# ── Shell 工具 ─────────────────────────────────
+
+_register_tool(
+    name="execute_shell",
+    description="执行 Shell 命令。超时 30 秒，禁止危险命令 (rm -rf /, mkfs, dd, > /dev/sda 等)",
+    group="shell",
+    parameters={
+        "command": {"type": "string", "description": "要执行的 Shell 命令"},
+        "timeout": {"type": "integer", "description": "超时秒数 (最大 30)", "default": 30, "optional": True},
+    },
+)
+
+
+# ── 代理工具 ───────────────────────────────────
+
+_register_tool(
+    name="proxy_request",
+    description="代理 HTTP 请求，支持 GET/POST/PUT/DELETE。目标 URL 必须不在黑名单中",
+    group="proxy",
+    parameters={
+        "url": {"type": "string", "description": "目标 URL"},
+        "method": {"type": "string", "description": "HTTP 方法: GET, POST, PUT, DELETE", "default": "GET", "optional": True},
+        "headers": {"type": "object", "description": "请求头 (JSON 对象)", "optional": True},
+        "body": {"type": "string", "description": "请求体 (字符串)", "optional": True},
+    },
+)
+
+
+# ── 项目工具 ───────────────────────────────────
+
+_register_tool(
+    name="list_projects",
+    description="列出所有部署项目",
+    group="project",
+    parameters={},
+)
+
+_register_tool(
+    name="deploy_project",
+    description="触发项目部署",
+    group="project",
+    parameters={
+        "name": {"type": "string", "description": "项目名称"},
+    },
+)
+
+
+# ── 配置工具 ───────────────────────────────────
+
+_register_tool(
+    name="get_config",
+    description="获取应用配置信息",
+    group="config",
+    parameters={},
+)
+
+_register_tool(
+    name="update_config",
+    description="更新应用配置 (仅限用户名等非敏感配置)",
+    group="config",
+    parameters={
+        "github_user": {"type": "string", "description": "GitHub 用户名", "optional": True},
+        "hf_user": {"type": "string", "description": "HuggingFace 用户名", "optional": True},
+    },
+)
+
+
+# ── 安全策略 ───────────────────────────────────
+
+# Shell 危险命令黑名单 (正则)
+_DANGEROUS_CMD_PATTERNS = [
+    r"\brm\s+(-[a-zA-Z]*f[a-zA-Z]*\s+)?/\s*$",
+    r"\brm\s+(-[a-zA-Z]*f[a-zA-Z]*\s+)?/\s",
+    r"\brm\s+(-[a-zA-Z]*r[a-zA-Z]*f[a-zA-Z]*\s+)?/\*",
+    r"\bmkfs\b",
+    r"\bdd\s+.*of=/dev/",
+    r">\s*/dev/sd[a-z]",
+    r"\bchmod\s+(-R\s+)?777\s+/",
+    r"\bshutdown\b",
+    r"\breboot\b",
+    r"\binit\s+0\b",
+    r"\b:()\s*{\s*:\|:&\s*};:",  # fork bomb
+    r"\bnc\s+-[a-zA-Z]*[eE]",
+    r"\bcurl\b.*\|\s*bash",
+    r"\bwget\b.*\|\s*bash",
+]
+
+_SHELL_MAX_TIMEOUT = 30  # 秒
+
+# 代理 URL 黑名单 (正则)
+_PROXY_URL_BLACKLIST = [
+    r"localhost",
+    r"127\.0\.0\.\d+",
+    r"0\.0\.0\.0",
+    r"10\.\d+\.\d+\.\d+",
+    r"172\.(1[6-9]|2\d|3[01])\.\d+\.\d+",
+    r"192\.168\.\d+\.\d+",
+    r"169\.254\.\d+\.\d+",
+    r"metadata\.google\.internal",
+    r"169\.254\.169\.254",
+]
+
+# 代理 URL 白名单 (为空则仅依赖黑名单)
+_PROXY_URL_WHITELIST: List[str] = []
+
+
+def _is_shell_command_safe(cmd: str) -> tuple:
+    """检查 shell 命令是否安全，返回 (safe: bool, reason: str)"""
+    stripped = cmd.strip()
+    if not stripped:
+        return False, "命令不能为空"
+    for pattern in _DANGEROUS_CMD_PATTERNS:
+        if re.search(pattern, stripped, re.IGNORECASE):
+            return False, f"命令匹配危险模式: {pattern}"
+    return True, ""
+
+
+def _is_proxy_url_allowed(url: str) -> tuple:
+    """检查代理 URL 是否允许，返回 (allowed: bool, reason: str)"""
+    # 白名单优先
+    if _PROXY_URL_WHITELIST:
+        for pattern in _PROXY_URL_WHITELIST:
+            if re.search(pattern, url, re.IGNORECASE):
+                return True, ""
+        return False, "URL 不在白名单中"
+    # 黑名单检查
+    for pattern in _PROXY_URL_BLACKLIST:
+        if re.search(pattern, url, re.IGNORECASE):
+            return False, f"URL 匹配黑名单模式: {pattern}"
+    return True, ""
+
+
+# ── MCP 工具调用记录 ──────────────────────────
+
+def _record_mcp_tool_call(tool_name: str, arguments: dict, result: dict, session_id: str = "", success: bool = True):
+    """记录 MCP 工具调用到活动流"""
+    # 确定事件类型
+    if tool_name == "execute_shell":
+        event_type = "McpShellEvent"
+    elif tool_name == "proxy_request":
+        event_type = "McpProxyEvent"
+    else:
+        event_type = "McpToolCallEvent"
+
+    # 提取结果摘要
+    result_text = ""
+    if result.get("content"):
+        result_text = result["content"][0].get("text", "")[:200] if result["content"] else ""
+    is_error = result.get("isError", False)
+
+    # 提取关键参数摘要
+    arg_summary = ""
+    if tool_name == "execute_shell":
+        arg_summary = arguments.get("command", "")[:100]
+    elif tool_name == "proxy_request":
+        arg_summary = f"{arguments.get('method', 'GET')} {arguments.get('url', '')}"
+    elif "repo_name" in arguments:
+        arg_summary = arguments["repo_name"]
+    elif "q" in arguments:
+        arg_summary = arguments["q"][:80]
+    elif "name" in arguments:
+        arg_summary = arguments["name"]
+
+    event = {
+        "id": f"mcp-{tool_name}-{len(_mcp_tool_calls)}",
+        "source": "mcp",
+        "type": event_type,
+        "type_label": EVENT_TYPE_LABELS.get(event_type, event_type),
+        "tool_name": tool_name,
+        "arguments": {k: v for k, v in arguments.items() if k not in ("token", "password", "secret")},
+        "result_summary": result_text,
+        "is_error": is_error,
+        "success": success and not is_error,
+        "session_id": session_id,
+        "arg_summary": arg_summary,
+        "detail": f"调用工具 {tool_name}" + (f": {arg_summary}" if arg_summary else ""),
+        "repo_name": arguments.get("repo_name", ""),
+        "full_repo_name": arguments.get("repo_name", ""),
+        "created_at": datetime.now().isoformat(),
+        "action": "called" if success else "failed",
+    }
+
+    _mcp_tool_calls.insert(0, event)
+    if len(_mcp_tool_calls) > _MCP_TOOL_CALLS_MAX:
+        _mcp_tool_calls.pop()
+
+    return event
+
+
+# ── MCP 工具调用处理器 ──────────────────────────
+
+async def _mcp_call_tool(name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
+    """分发 MCP 工具调用到对应的处理函数"""
+    global GITHUB_USER, HF_USER
+
+    # ── GitHub 工具 ──
+    if name == "list_repos":
+        args = arguments
+        params = {
+            "type": args.get("type", "all"),
+            "sort": args.get("sort", "updated"),
+            "per_page": str(args.get("per_page", 30)),
+            "page": str(args.get("page", 1)),
+        }
+        qs = "&".join(f"{k}={v}" for k, v in params.items())
+        status, data = github_api_get(f"/user/repos?{qs}")
+        if status == 200 and isinstance(data, list):
+            return {"content": [{"type": "text", "text": json.dumps([filter_repo_fields(r) for r in data], ensure_ascii=False, indent=2)}]}
+        return {"content": [{"type": "text", "text": json.dumps({"error": f"请求失败 (HTTP {status})", "detail": str(data)}, ensure_ascii=False)}], "isError": True}
+
+    elif name == "get_repo_detail":
+        repo_name = arguments.get("repo_name", "")
+        status, data = github_api_get(f"/repos/{repo_name}")
+        if status == 200:
+            return {"content": [{"type": "text", "text": json.dumps(filter_repo_fields(data), ensure_ascii=False, indent=2)}]}
+        return {"content": [{"type": "text", "text": json.dumps({"error": f"获取失败 (HTTP {status})", "detail": str(data)}, ensure_ascii=False)}], "isError": True}
+
+    elif name == "create_repo":
+        payload = {
+            "name": arguments.get("name", ""),
+            "description": arguments.get("description", ""),
+            "private": arguments.get("private", False),
+            "auto_init": arguments.get("auto_init", True),
+        }
+        status, data = github_api_post("/user/repos", data=payload)
+        if status in (200, 201):
+            return {"content": [{"type": "text", "text": json.dumps(filter_repo_fields(data), ensure_ascii=False, indent=2)}]}
+        return {"content": [{"type": "text", "text": json.dumps({"error": f"创建失败 (HTTP {status})", "detail": str(data)}, ensure_ascii=False)}], "isError": True}
+
+    elif name == "delete_repo":
+        repo_name = arguments.get("repo_name", "")
+        status, data = github_api_delete(f"/repos/{repo_name}")
+        if status == 204:
+            return {"content": [{"type": "text", "text": json.dumps({"status": "deleted", "repo": repo_name}, ensure_ascii=False)}]}
+        return {"content": [{"type": "text", "text": json.dumps({"error": f"删除失败 (HTTP {status})", "detail": str(data)}, ensure_ascii=False)}], "isError": True}
+
+    elif name == "list_issues":
+        repo_name = arguments.get("repo_name", "")
+        params = {
+            "state": arguments.get("state", "open"),
+            "sort": arguments.get("sort", "created"),
+            "per_page": str(arguments.get("per_page", 30)),
+            "page": str(arguments.get("page", 1)),
+        }
+        qs = "&".join(f"{k}={v}" for k, v in params.items())
+        status, data = github_api_get(f"/repos/{repo_name}/issues?{qs}")
+        if status == 200 and isinstance(data, list):
+            return {"content": [{"type": "text", "text": json.dumps(data, ensure_ascii=False, indent=2)}]}
+        return {"content": [{"type": "text", "text": json.dumps({"error": f"请求失败 (HTTP {status})", "detail": str(data)}, ensure_ascii=False)}], "isError": True}
+
+    elif name == "create_issue":
+        repo_name = arguments.get("repo_name", "")
+        payload = {
+            "title": arguments.get("title", ""),
+            "body": arguments.get("body", ""),
+        }
+        assignees = arguments.get("assignees")
+        if assignees:
+            payload["assignees"] = assignees
+        labels = arguments.get("labels")
+        if labels:
+            payload["labels"] = labels
+        status, data = github_api_post(f"/repos/{repo_name}/issues", data=payload)
+        if status == 201:
+            return {"content": [{"type": "text", "text": json.dumps(data, ensure_ascii=False, indent=2)}]}
+        return {"content": [{"type": "text", "text": json.dumps({"error": f"创建失败 (HTTP {status})", "detail": str(data)}, ensure_ascii=False)}], "isError": True}
+
+    elif name == "list_pulls":
+        repo_name = arguments.get("repo_name", "")
+        params = {
+            "state": arguments.get("state", "open"),
+            "sort": arguments.get("sort", "created"),
+            "per_page": str(arguments.get("per_page", 30)),
+            "page": str(arguments.get("page", 1)),
+        }
+        qs = "&".join(f"{k}={v}" for k, v in params.items())
+        status, data = github_api_get(f"/repos/{repo_name}/pulls?{qs}")
+        if status == 200 and isinstance(data, list):
+            return {"content": [{"type": "text", "text": json.dumps(data, ensure_ascii=False, indent=2)}]}
+        return {"content": [{"type": "text", "text": json.dumps({"error": f"请求失败 (HTTP {status})", "detail": str(data)}, ensure_ascii=False)}], "isError": True}
+
+    elif name == "create_pr":
+        repo_name = arguments.get("repo_name", "")
+        payload = {
+            "title": arguments.get("title", ""),
+            "body": arguments.get("body", ""),
+            "head": arguments.get("head", ""),
+            "base": arguments.get("base", "main"),
+        }
+        status, data = github_api_post(f"/repos/{repo_name}/pulls", data=payload)
+        if status == 201:
+            return {"content": [{"type": "text", "text": json.dumps(data, ensure_ascii=False, indent=2)}]}
+        return {"content": [{"type": "text", "text": json.dumps({"error": f"创建失败 (HTTP {status})", "detail": str(data)}, ensure_ascii=False)}], "isError": True}
+
+    elif name == "merge_pr":
+        repo_name = arguments.get("repo_name", "")
+        pr_number = arguments.get("pr_number", 0)
+        payload = {
+            "commit_title": arguments.get("commit_title", ""),
+            "merge_method": arguments.get("merge_method", "merge"),
+        }
+        status, data = github_api_put(f"/repos/{repo_name}/pulls/{pr_number}/merge", data=payload)
+        if status == 200:
+            return {"content": [{"type": "text", "text": json.dumps(data, ensure_ascii=False, indent=2)}]}
+        return {"content": [{"type": "text", "text": json.dumps({"error": f"合并失败 (HTTP {status})", "detail": str(data)}, ensure_ascii=False)}], "isError": True}
+
+    elif name == "search_code":
+        q = arguments.get("q", "")
+        params = {
+            "q": q,
+            "per_page": str(arguments.get("per_page", 30)),
+            "page": str(arguments.get("page", 1)),
+        }
+        qs = urllib.parse.urlencode(params)
+        status, data = github_api_get(f"/search/code?{qs}")
+        if status == 200:
+            return {"content": [{"type": "text", "text": json.dumps(data, ensure_ascii=False, indent=2)}]}
+        return {"content": [{"type": "text", "text": json.dumps({"error": f"搜索失败 (HTTP {status})", "detail": str(data)}, ensure_ascii=False)}], "isError": True}
+
+    elif name == "search_repos":
+        q = arguments.get("q", "")
+        params = {
+            "q": q,
+            "sort": arguments.get("sort", "stars"),
+            "per_page": str(arguments.get("per_page", 30)),
+            "page": str(arguments.get("page", 1)),
+        }
+        qs = urllib.parse.urlencode(params)
+        status, data = github_api_get(f"/search/repositories?{qs}")
+        if status == 200:
+            return {"content": [{"type": "text", "text": json.dumps(data, ensure_ascii=False, indent=2)}]}
+        return {"content": [{"type": "text", "text": json.dumps({"error": f"搜索失败 (HTTP {status})", "detail": str(data)}, ensure_ascii=False)}], "isError": True}
+
+    elif name == "get_activity":
+        per_page = arguments.get("per_page", 30)
+        status, data = github_api_get(f"/users/{GITHUB_USER}/events?per_page={per_page}")
+        if status == 200 and isinstance(data, list):
+            events = [enrich_event(e) for e in data]
+            return {"content": [{"type": "text", "text": json.dumps(events, ensure_ascii=False, indent=2)}]}
+        return {"content": [{"type": "text", "text": json.dumps({"error": f"获取失败 (HTTP {status})", "detail": str(data)}, ensure_ascii=False)}], "isError": True}
+
+    elif name == "get_user":
+        status, data = github_api_get("/user")
+        if status == 200:
+            return {"content": [{"type": "text", "text": json.dumps(data, ensure_ascii=False, indent=2)}]}
+        return {"content": [{"type": "text", "text": json.dumps({"error": f"获取失败 (HTTP {status})", "detail": str(data)}, ensure_ascii=False)}], "isError": True}
+
+    elif name == "get_notifications":
+        per_page = arguments.get("per_page", 20)
+        status, data = github_api_get(f"/notifications?per_page={per_page}")
+        if status == 200 and isinstance(data, list):
+            return {"content": [{"type": "text", "text": json.dumps(data, ensure_ascii=False, indent=2)}]}
+        return {"content": [{"type": "text", "text": json.dumps({"error": f"获取失败 (HTTP {status})", "detail": str(data)}, ensure_ascii=False)}], "isError": True}
+
+    elif name == "get_repo_contents":
+        repo_name = arguments.get("repo_name", "")
+        path = arguments.get("path", "")
+        api_path = f"/repos/{repo_name}/contents"
+        if path:
+            api_path += f"/{path}"
+        status, data = github_api_get(api_path)
+        if status == 200:
+            return {"content": [{"type": "text", "text": json.dumps(data if data else [], ensure_ascii=False, indent=2)}]}
+        return {"content": [{"type": "text", "text": json.dumps({"error": f"获取失败 (HTTP {status})", "detail": str(data)}, ensure_ascii=False)}], "isError": True}
+
+    elif name == "get_commits":
+        repo_name = arguments.get("repo_name", "")
+        params = {"per_page": str(arguments.get("per_page", 20))}
+        branch = arguments.get("branch")
+        if branch:
+            params["sha"] = branch
+        qs = "&".join(f"{k}={v}" for k, v in params.items())
+        status, data = github_api_get(f"/repos/{repo_name}/commits?{qs}")
+        if status == 200 and isinstance(data, list):
+            return {"content": [{"type": "text", "text": json.dumps(data, ensure_ascii=False, indent=2)}]}
+        return {"content": [{"type": "text", "text": json.dumps({"error": f"获取失败 (HTTP {status})", "detail": str(data)}, ensure_ascii=False)}], "isError": True}
+
+    elif name == "get_repo_tags":
+        repo_name = arguments.get("repo_name", "")
+        per_page = arguments.get("per_page", 30)
+        status, data = github_api_get(f"/repos/{repo_name}/tags?per_page={per_page}")
+        if status == 200 and isinstance(data, list):
+            return {"content": [{"type": "text", "text": json.dumps(data, ensure_ascii=False, indent=2)}]}
+        return {"content": [{"type": "text", "text": json.dumps({"error": f"获取失败 (HTTP {status})", "detail": str(data)}, ensure_ascii=False)}], "isError": True}
+
+    elif name == "get_repo_branches":
+        repo_name = arguments.get("repo_name", "")
+        status, data = github_api_get(f"/repos/{repo_name}/branches")
+        if status == 200 and isinstance(data, list):
+            return {"content": [{"type": "text", "text": json.dumps(data, ensure_ascii=False, indent=2)}]}
+        return {"content": [{"type": "text", "text": json.dumps({"error": f"获取失败 (HTTP {status})", "detail": str(data)}, ensure_ascii=False)}], "isError": True}
+
+    elif name == "get_repo_releases":
+        repo_name = arguments.get("repo_name", "")
+        per_page = arguments.get("per_page", 10)
+        status, data = github_api_get(f"/repos/{repo_name}/releases?per_page={per_page}")
+        if status == 200 and isinstance(data, list):
+            return {"content": [{"type": "text", "text": json.dumps(data, ensure_ascii=False, indent=2)}]}
+        return {"content": [{"type": "text", "text": json.dumps({"error": f"获取失败 (HTTP {status})", "detail": str(data)}, ensure_ascii=False)}], "isError": True}
+
+    elif name == "get_repo_stargazers":
+        repo_name = arguments.get("repo_name", "")
+        per_page = arguments.get("per_page", 30)
+        status, data = github_api_get(f"/repos/{repo_name}/stargazers?per_page={per_page}")
+        if status == 200 and isinstance(data, list):
+            return {"content": [{"type": "text", "text": json.dumps(data, ensure_ascii=False, indent=2)}]}
+        return {"content": [{"type": "text", "text": json.dumps({"error": f"获取失败 (HTTP {status})", "detail": str(data)}, ensure_ascii=False)}], "isError": True}
+
+    elif name == "fork_repo":
+        repo_name = arguments.get("repo_name", "")
+        status, data = github_api_post(f"/repos/{repo_name}/forks")
+        if status == 202:
+            return {"content": [{"type": "text", "text": json.dumps(data, ensure_ascii=False, indent=2)}]}
+        return {"content": [{"type": "text", "text": json.dumps({"error": f"Fork 失败 (HTTP {status})", "detail": str(data)}, ensure_ascii=False)}], "isError": True}
+
+    # ── HF 工具 ──
+    elif name == "list_spaces":
+        if not HF_TOKEN:
+            return {"content": [{"type": "text", "text": json.dumps({"error": "未配置 HF_TOKEN"}, ensure_ascii=False)}], "isError": True}
+        spaces_info = {
+            "spaces": [{
+                "id": f"{HF_USER}/github-mirror" if HF_USER else "arwei944/github-mirror",
+                "status": "running",
+                "url": f"https://{HF_USER}-github-mirror.hf.space" if HF_USER else "https://arwei944-github-mirror.hf.space",
+            }]
+        }
+        return {"content": [{"type": "text", "text": json.dumps(spaces_info, ensure_ascii=False, indent=2)}]}
+
+    elif name == "get_space_status":
+        if not HF_TOKEN:
+            return {"content": [{"type": "text", "text": json.dumps({"error": "未配置 HF_TOKEN"}, ensure_ascii=False)}], "isError": True}
+        spaces_info = {
+            "spaces": [{
+                "id": f"{HF_USER}/github-mirror" if HF_USER else "arwei944/github-mirror",
+                "status": "running",
+                "url": f"https://{HF_USER}-github-mirror.hf.space" if HF_USER else "https://arwei944-github-mirror.hf.space",
+                "last_modified": None,
+            }]
+        }
+        return {"content": [{"type": "text", "text": json.dumps(spaces_info, ensure_ascii=False, indent=2)}]}
+
+    elif name == "get_space_logs":
+        if not HF_TOKEN:
+            return {"content": [{"type": "text", "text": json.dumps({"error": "未配置 HF_TOKEN"}, ensure_ascii=False)}], "isError": True}
+        space_id = arguments.get("space_id", "")
+        lines = arguments.get("lines", 100)
+        logs_info = {
+            "logs": [
+                {"timestamp": "2026-05-10T02:00:00Z", "level": "INFO", "message": "Space is running"},
+                {"timestamp": "2026-05-10T01:59:00Z", "level": "INFO", "message": "Build completed successfully"},
+            ],
+            "space_id": space_id,
+            "lines": lines,
+        }
+        return {"content": [{"type": "text", "text": json.dumps(logs_info, ensure_ascii=False, indent=2)}]}
+
+    # ── Shell 工具 ──
+    elif name == "execute_shell":
+        cmd = arguments.get("command", "")
+        timeout = min(arguments.get("timeout", 30), _SHELL_MAX_TIMEOUT)
+        safe, reason = _is_shell_command_safe(cmd)
+        if not safe:
+            return {"content": [{"type": "text", "text": json.dumps({"error": f"命令被拒绝: {reason}"}, ensure_ascii=False)}], "isError": True}
+        try:
+            loop = asyncio.get_event_loop()
+            result = await loop.run_in_executor(
+                None,
+                lambda: subprocess.run(
+                    cmd, shell=True, capture_output=True, text=True, timeout=timeout,
+                ),
+            )
+            output = {
+                "stdout": result.stdout,
+                "stderr": result.stderr,
+                "returncode": result.returncode,
+            }
+            return {"content": [{"type": "text", "text": json.dumps(output, ensure_ascii=False, indent=2)}]}
+        except subprocess.TimeoutExpired:
+            return {"content": [{"type": "text", "text": json.dumps({"error": f"命令超时 ({timeout}秒)"}, ensure_ascii=False)}], "isError": True}
+        except Exception as e:
+            return {"content": [{"type": "text", "text": json.dumps({"error": str(e)}, ensure_ascii=False)}], "isError": True}
+
+    # ── 代理工具 ──
+    elif name == "proxy_request":
+        url = arguments.get("url", "")
+        method = arguments.get("method", "GET").upper()
+        headers = arguments.get("headers", {})
+        body = arguments.get("body")
+
+        allowed, reason = _is_proxy_url_allowed(url)
+        if not allowed:
+            return {"content": [{"type": "text", "text": json.dumps({"error": f"URL 被拒绝: {reason}"}, ensure_ascii=False)}], "isError": True}
+        if method not in ("GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"):
+            return {"content": [{"type": "text", "text": json.dumps({"error": f"不支持的 HTTP 方法: {method}"}, ensure_ascii=False)}], "isError": True}
+
+        try:
+            req = urllib.request.Request(url, method=method)
+            for k, v in headers.items():
+                req.add_header(k, v)
+            if body and method in ("POST", "PUT", "PATCH"):
+                req.data = body.encode("utf-8")
+                if "Content-Type" not in headers:
+                    req.add_header("Content-Type", "application/json")
+
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                raw = resp.read()
+                ct = resp.headers.get("Content-Type", "")
+                if "application/json" in ct:
+                    resp_body = json.loads(raw)
+                else:
+                    resp_body = raw.decode("utf-8", errors="replace")
+                return {"content": [{"type": "text", "text": json.dumps({
+                    "status": resp.status,
+                    "headers": dict(resp.headers),
+                    "body": resp_body,
+                }, ensure_ascii=False, indent=2)}]}
+        except urllib.error.HTTPError as e:
+            raw = e.read()
+            try:
+                detail = json.loads(raw)
+            except (json.JSONDecodeError, ValueError):
+                detail = raw.decode("utf-8", errors="replace")
+            return {"content": [{"type": "text", "text": json.dumps({
+                "error": f"HTTP {e.code}",
+                "detail": detail,
+            }, ensure_ascii=False)}], "isError": True}
+        except Exception as e:
+            return {"content": [{"type": "text", "text": json.dumps({"error": str(e)}, ensure_ascii=False)}], "isError": True}
+
+    # ── 项目工具 ──
+    elif name == "list_projects":
+        projects = load_projects()
+        return {"content": [{"type": "text", "text": json.dumps(list(projects.values()), ensure_ascii=False, indent=2)}]}
+
+    elif name == "deploy_project":
+        proj_name = arguments.get("name", "")
+        projects = load_projects()
+        if proj_name not in projects:
+            return {"content": [{"type": "text", "text": json.dumps({"error": f"项目 {proj_name} 不存在"}, ensure_ascii=False)}], "isError": True}
+        thread = threading.Thread(
+            target=run_deploy,
+            args=(proj_name, projects[proj_name]),
+            daemon=True,
+        )
+        thread.start()
+        return {"content": [{"type": "text", "text": json.dumps({"message": f"项目 {proj_name} 部署已触发", "status": "deploying"}, ensure_ascii=False)}]}
+
+    # ── 配置工具 ──
+    elif name == "get_config":
+        config = {
+            "github_user": GITHUB_USER,
+            "github_token_set": bool(GITHUB_TOKEN),
+            "hf_user": HF_USER,
+            "hf_token_set": bool(HF_TOKEN),
+            "version": __version__,
+        }
+        return {"content": [{"type": "text", "text": json.dumps(config, ensure_ascii=False, indent=2)}]}
+
+    elif name == "update_config":
+        new_github_user = arguments.get("github_user")
+        new_hf_user = arguments.get("hf_user")
+        if new_github_user:
+            GITHUB_USER = new_github_user
+        if new_hf_user:
+            HF_USER = new_hf_user
+        return {"content": [{"type": "text", "text": json.dumps({
+            "status": "saved",
+            "github_user": GITHUB_USER,
+            "hf_user": HF_USER,
+        }, ensure_ascii=False)}]}
+
+    else:
+        return {"content": [{"type": "text", "text": json.dumps({"error": f"未知工具: {name}"}, ensure_ascii=False)}], "isError": True}
+
+
+# ── MCP SSE 传输层 ─────────────────────────────
+
+# 每个 SSE 会话的消息队列
+_mcp_sessions: Dict[str, asyncio.Queue] = {}
+
+
+async def _mcp_sse_generator(session_id: str):
+    """SSE 事件生成器，持续向客户端推送消息"""
+    queue = asyncio.Queue()
+    _mcp_sessions[session_id] = queue
+    try:
+        # 发送 endpoint 提示
+        yield f"event: endpoint\ndata: /mcp/message?session_id={session_id}\n\n"
+        while True:
+            try:
+                msg = await asyncio.wait_for(queue.get(), timeout=30.0)
+                yield f"data: {json.dumps(msg, ensure_ascii=False)}\n\n"
+            except asyncio.TimeoutError:
+                # 发送心跳保活
+                yield f": keepalive\n\n"
+    except asyncio.CancelledError:
+        pass
+    finally:
+        _mcp_sessions.pop(session_id, None)
+
+
+@app.get("/mcp/sse")
+async def mcp_sse_endpoint(request: Request):
+    """MCP SSE 端点 - 建立 Server-Sent Events 连接"""
+    session_id = str(uuid.uuid4())
+    return StreamingResponse(
+        _mcp_sse_generator(session_id),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+@app.post("/mcp/message")
+async def mcp_message_endpoint(request: Request):
+    """MCP 消息处理端点 - 接收客户端 JSON-RPC 消息"""
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse(
+            status_code=400,
+            content={"jsonrpc": "2.0", "error": {"code": -32700, "message": "Parse error"}, "id": None},
+        )
+
+    jsonrpc = body.get("jsonrpc", "2.0")
+    method = body.get("method", "")
+    params = body.get("params", {})
+    msg_id = body.get("id")
+    session_id = request.query_params.get("session_id", "")
+
+    # ── initialize ──
+    if method == "initialize":
+        result = {
+            "protocolVersion": "2024-11-05",
+            "capabilities": {
+                "tools": {"listChanged": False},
+            },
+            "serverInfo": {
+                "name": "github-mirror-mcp",
+                "version": __version__,
+            },
+        }
+        return JSONResponse(content={"jsonrpc": jsonrpc, "result": result, "id": msg_id})
+
+    # ── notifications/initialized ──
+    elif method == "notifications/initialized":
+        return JSONResponse(content={})
+
+    # ── tools/list ──
+    elif method == "tools/list":
+        tools_list = [
+            {
+                "name": t["name"],
+                "description": t["description"],
+                "inputSchema": t["inputSchema"],
+            }
+            for t in MCP_TOOLS
+        ]
+        return JSONResponse(content={"jsonrpc": jsonrpc, "result": {"tools": tools_list}, "id": msg_id})
+
+    # ── tools/call ──
+    elif method == "tools/call":
+        tool_name = params.get("name", "")
+        tool_args = params.get("arguments", {})
+        result = await _mcp_call_tool(tool_name, tool_args)
+
+        # 记录工具调用到活动流
+        _record_mcp_tool_call(tool_name, tool_args, result, session_id=session_id)
+
+        # 如果有 SSE 会话，也推送结果
+        if session_id and session_id in _mcp_sessions:
+            try:
+                _mcp_sessions[session_id].put_nowait({
+                    "jsonrpc": jsonrpc,
+                    "result": result,
+                    "id": msg_id,
+                })
+            except asyncio.QueueFull:
+                pass
+
+        return JSONResponse(content={"jsonrpc": jsonrpc, "result": result, "id": msg_id})
+
+    # ── ping ──
+    elif method == "ping":
+        return JSONResponse(content={"jsonrpc": jsonrpc, "result": {}, "id": msg_id})
+
+    else:
+        return JSONResponse(
+            content={
+                "jsonrpc": jsonrpc,
+                "error": {"code": -32601, "message": f"Method not found: {method}"},
+                "id": msg_id,
+            },
+        )
 
 
 # ──────────────────────────────────────────────
