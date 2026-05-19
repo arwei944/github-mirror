@@ -10,7 +10,7 @@ RUN npm run build
 FROM python:3.11-slim
 
 LABEL maintainer="arwei944"
-LABEL version="6.0.0"
+LABEL version="7.1.0"
 LABEL description="GitHub Mirror - Complete GitHub Mirror Platform with MCP"
 
 # 安装运行时依赖（不安装构建工具）
@@ -27,9 +27,12 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# 复制应用代码
-COPY app.py .
+# 复制应用代码（新架构：backend/ 目录）
+COPY backend/ ./backend/
 COPY --from=frontend-builder /static ./static
+
+# 保留旧入口作为兼容（可选）
+# COPY app.py .
 
 # 创建数据目录并设置权限
 RUN mkdir -p /app/data && chown -R appuser:appuser /app
@@ -45,4 +48,4 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
 
 # 使用 tini 作为 init 进程（正确处理信号）
 ENTRYPOINT ["tini", "--"]
-CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "7860"]
+CMD ["uvicorn", "backend.main:app", "--host", "0.0.0.0", "--port", "7860"]
