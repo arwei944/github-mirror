@@ -148,7 +148,7 @@ GITHUB_USER = os.environ.get("GITHUB_USER", "")
 HF_TOKEN = os.environ.get("HF_TOKEN", "")
 HF_USER = os.environ.get("HF_USER", "")
 WEBHOOK_SECRET = os.environ.get("WEBHOOK_SECRET", "")
-DATA_DIR = os.environ.get("DATA_DIR", "/data/user/work/github-mirror/data")
+DATA_DIR = os.environ.get("DATA_DIR", os.path.join(os.path.dirname(os.path.abspath(__file__)), "data"))
 
 # 确保数据目录存在
 Path(DATA_DIR).mkdir(parents=True, exist_ok=True)
