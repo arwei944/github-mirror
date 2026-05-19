@@ -6343,6 +6343,73 @@ async def detect_repo_type(repo_name: str):
     return result
 
 
+# ──────────────────────────────────────────────
+# 自更新 API（从 GitHub 拉取最新代码并重启）
+# ──────────────────────────────────────────────
+
+@app.post("/api/self-update")
+async def self_update(request: Request):
+    """从 GitHub 拉取最新代码并重启服务（仅限 HF Space 环境）"""
+    import subprocess, signal, os
+
+    body = await request.json() if request.headers.get("content-type", "").startswith("application/json") else {}
+    repo_url = body.get("repo_url", f"https://github.com/{GITHUB_USER}/github-mirror.git")
+    branch = body.get("branch", "main")
+
+    def _do_update():
+        try:
+            # 在 HF Space 中，代码在 /app 或 /home/user/app
+            app_dir = os.getcwd()
+            logger.info(f"[自更新] 开始从 {repo_url} 拉取 {branch} 到 {app_dir}")
+
+            # git fetch + reset
+            subprocess.run(["git", "fetch", "origin", branch], cwd=app_dir, capture_output=True, text=True, timeout=120)
+            result = subprocess.run(["git", "reset", "--hard", f"origin/{branch}"], cwd=app_dir, capture_output=True, text=True, timeout=60)
+            if result.returncode != 0:
+                logger.error(f"[自更新] git reset 失败: {result.stderr}")
+
+            # 重新安装依赖
+            if os.path.exists(os.path.join(app_dir, "requirements.txt")):
+                subprocess.run(["pip", "install", "-r", "requirements.txt", "--quiet"], cwd=app_dir, capture_output=True, text=True, timeout=300)
+
+            # 重建前端
+            frontend_dir = os.path.join(app_dir, "frontend")
+            if os.path.exists(frontend_dir):
+                subprocess.run(["npm", "install", "--silent"], cwd=frontend_dir, capture_output=True, text=True, timeout=300)
+                subprocess.run(["npm", "run", "build"], cwd=frontend_dir, capture_output=True, text=True, timeout=120)
+
+            logger.info("[自更新] 更新完成，发送 SIGTERM 重启...")
+            # HF Space 会自动重启进程
+            os.kill(os.getpid(), signal.SIGTERM)
+        except Exception as e:
+            logger.error(f"[自更新] 失败: {e}")
+
+    # 后台执行更新
+    thread = threading.Thread(target=_do_update, daemon=True)
+    thread.start()
+
+    return {"status": "updating", "message": f"正在从 {repo_url} 拉取 {branch} 并重启..."}
+
+
+@app.get("/api/self-update/status")
+async def self_update_status():
+    """获取当前版本信息"""
+    import subprocess
+    try:
+        result = subprocess.run(["git", "log", "-1", "--format=%H %s %ci"], capture_output=True, text=True, timeout=5)
+        if result.returncode == 0:
+            parts = result.stdout.strip().split(" ", 2)
+            return {
+                "version": __version__,
+                "commit": parts[0][:7] if parts else "?",
+                "message": parts[1] if len(parts) > 1 else "",
+                "date": parts[2] if len(parts) > 2 else "",
+            }
+    except Exception:
+        pass
+    return {"version": __version__}
+
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
