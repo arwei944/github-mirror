@@ -38,7 +38,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 
-__version__ = "6.4.0"
+__version__ = "6.5.0"
 
 app = FastAPI(
     version=__version__,
@@ -73,6 +73,9 @@ def _is_public_path(path: str) -> bool:
         return True
     # MCP SSE 端点通过 query param 传递 session_id，不检查 API Key
     if path.startswith("/mcp/sse"):
+        return True
+    # MCP Streamable HTTP 端点
+    if path == "/mcp":
         return True
     # 静态文件
     if path.startswith("/assets/"):
@@ -5666,62 +5669,14 @@ async def _mcp_call_tool(name: str, arguments: Dict[str, Any]) -> Dict[str, Any]
 
 # ── MCP SSE 传输层 ─────────────────────────────
 
-# 每个 SSE 会话的消息队列
-_mcp_sessions: Dict[str, asyncio.Queue] = {}
+# ── MCP 公共 JSON-RPC 处理逻辑 ────────────────
 
-
-async def _mcp_sse_generator(session_id: str, base_url: str):
-    """SSE 事件生成器，持续向客户端推送消息"""
-    queue = asyncio.Queue()
-    _mcp_sessions[session_id] = queue
-    try:
-        # 返回完整的绝对 URL，避免客户端 URL 拼接问题
-        yield f"event: endpoint\ndata: {base_url}/mcp/sse/message?session_id={session_id}\n\n"
-        while True:
-            try:
-                msg = await asyncio.wait_for(queue.get(), timeout=30.0)
-                yield f"data: {json.dumps(msg, ensure_ascii=False)}\n\n"
-            except asyncio.TimeoutError:
-                # 发送心跳保活
-                yield f": keepalive\n\n"
-    except asyncio.CancelledError:
-        pass
-    finally:
-        _mcp_sessions.pop(session_id, None)
-
-
-@app.get("/mcp/sse")
-async def mcp_sse_endpoint(request: Request):
-    """MCP SSE 端点 - 建立 Server-Sent Events 连接"""
-    session_id = str(uuid.uuid4())
-    base_url = str(request.base_url).rstrip('/')
-    return StreamingResponse(
-        _mcp_sse_generator(session_id, base_url),
-        media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-            "X-Accel-Buffering": "no",
-        },
-    )
-
-
-@app.post("/mcp/sse/message")
-async def mcp_message_endpoint(request: Request):
-    """MCP 消息处理端点 - 接收客户端 JSON-RPC 消息"""
-    try:
-        body = await request.json()
-    except Exception:
-        return JSONResponse(
-            status_code=400,
-            content={"jsonrpc": "2.0", "error": {"code": -32700, "message": "Parse error"}, "id": None},
-        )
-
+async def _handle_mcp_jsonrpc(body: dict, session_id: str = "") -> JSONResponse:
+    """处理 MCP JSON-RPC 请求的公共逻辑，供 SSE 和 Streamable HTTP 共用"""
     jsonrpc = body.get("jsonrpc", "2.0")
     method = body.get("method", "")
     params = body.get("params", {})
     msg_id = body.get("id")
-    session_id = request.query_params.get("session_id", "")
 
     # ── initialize ──
     if method == "initialize":
@@ -5787,6 +5742,85 @@ async def mcp_message_endpoint(request: Request):
                 "id": msg_id,
             },
         )
+
+
+# 每个 SSE 会话的消息队列
+_mcp_sessions: Dict[str, asyncio.Queue] = {}
+
+
+async def _mcp_sse_generator(session_id: str, base_url: str):
+    """SSE 事件生成器，持续向客户端推送消息"""
+    queue = asyncio.Queue()
+    _mcp_sessions[session_id] = queue
+    try:
+        # 返回完整的绝对 URL，避免客户端 URL 拼接问题
+        yield f"event: endpoint\ndata: {base_url}/mcp/sse/message?session_id={session_id}\n\n"
+        while True:
+            try:
+                msg = await asyncio.wait_for(queue.get(), timeout=30.0)
+                yield f"data: {json.dumps(msg, ensure_ascii=False)}\n\n"
+            except asyncio.TimeoutError:
+                # 发送心跳保活
+                yield f": keepalive\n\n"
+    except asyncio.CancelledError:
+        pass
+    finally:
+        _mcp_sessions.pop(session_id, None)
+
+
+@app.get("/mcp/sse")
+async def mcp_sse_endpoint(request: Request):
+    """MCP SSE 端点 - 建立 Server-Sent Events 连接"""
+    session_id = str(uuid.uuid4())
+    base_url = str(request.base_url).rstrip('/')
+    return StreamingResponse(
+        _mcp_sse_generator(session_id, base_url),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+@app.post("/mcp/sse/message")
+async def mcp_message_endpoint(request: Request):
+    """MCP 消息处理端点 - 接收客户端 JSON-RPC 消息（SSE 传输）"""
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse(
+            status_code=400,
+            content={"jsonrpc": "2.0", "error": {"code": -32700, "message": "Parse error"}, "id": None},
+        )
+    session_id = request.query_params.get("session_id", "")
+    return await _handle_mcp_jsonrpc(body, session_id=session_id)
+
+
+# ── MCP Streamable HTTP 传输层 ─────────────────
+
+@app.post("/mcp")
+async def mcp_streamable_endpoint(request: Request):
+    """MCP Streamable HTTP 端点 - 兼容新版 MCP 客户端（SOLO、Claude Desktop 等）"""
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse(
+            status_code=400,
+            content={"jsonrpc": "2.0", "error": {"code": -32700, "message": "Parse error"}, "id": None},
+        )
+    return await _handle_mcp_jsonrpc(body)
+
+
+@app.get("/mcp")
+@app.get("/mcp/sse/message")
+async def mcp_get_probe():
+    """Streamable HTTP 客户端探测端点 - 返回 405 表示不支持 SSE 流"""
+    return JSONResponse(
+        status_code=405,
+        content={"error": "Method Not Allowed", "message": "Use POST for MCP requests"},
+    )
 
 
 # ──────────────────────────────────────────────

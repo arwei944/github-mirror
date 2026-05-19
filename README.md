@@ -15,7 +15,7 @@ pinned: false
 ## ✨ 功能特性
 
 - **GitHub API 完整代理** — 仓库、Issues、PRs、Actions、Search 等 227+ 端点
-- **MCP 服务端** — SSE 传输协议，30 个工具（GitHub/HF/Shell/Proxy/项目/配置）
+- **MCP 服务端** — SSE + Streamable HTTP 双传输协议，30 个工具（GitHub/HF/Shell/Proxy/项目/配置）
 - **Shell 命令执行** — 白名单安全限制 + 超时控制
 - **HTTP 代理工具** — URL 黑名单 + DNS Rebinding 防护
 - **实时活动流** — WebSocket + SSE 双通道
@@ -96,8 +96,26 @@ curl -H "X-API-Key: your-secret" http://localhost:7860/api/github/repos
 
 ### MCP 服务端
 
+支持两种传输协议：
+
+**Streamable HTTP（推荐，兼容 SOLO、Claude Desktop 等新版客户端）：**
+
+端点：`POST /mcp`
+
+```json
+{
+  "mcpServers": {
+    "github-mirror": {
+      "url": "http://localhost:7860/mcp"
+    }
+  }
+}
+```
+
+**SSE（兼容旧版客户端）：**
+
 SSE 端点：`GET /mcp/sse`
-消息端点：`POST /mcp/message`
+消息端点：`POST /mcp/sse/message`
 
 ```json
 {
