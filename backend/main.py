@@ -1,6 +1,6 @@
 """
 FastAPI 应用入口
-v7.1.0 - 从 app.py 迁移的核心入口
+v7.3.0 - Phase 3 路由拆分
 
 启动方式:
     uvicorn backend.main:app --host 0.0.0.0 --port 7860 --reload
@@ -66,12 +66,14 @@ async def lifespan(app: FastAPI):
     )
     logger.info(f"MCP 工具已注册: {registry.count} 个工具")
 
-    # 4. 初始化同步数据库（兼容旧逻辑）
+    # 4. 桥接 app.py 的所有路由（Phase 3 兼容层）
+    from .routers.registry import register_app_routes
     try:
-        from .db.connection import _db_path
-        logger.info(f"数据库路径: {_db_path}")
-    except Exception:
-        pass
+        import app as legacy_app
+        route_count = register_app_routes(app, legacy_app)
+        logger.info(f"已从 app.py 桥接 {route_count} 个 API 路由")
+    except Exception as e:
+        logger.error(f"桥接 app.py 路由失败: {e}")
 
     logger.info("GitHub Mirror 启动完成！")
     yield
