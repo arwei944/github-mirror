@@ -75,10 +75,23 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.error(f"桥接 app.py 路由失败: {e}")
 
+    # 5. 发射启动事件
+    from .core.events import event_bus, Event, EventType
+    await event_bus.publish(Event(
+        type=EventType.SYSTEM_STARTUP,
+        data={"version": settings.app_version, "routes": route_count if 'route_count' in dir() else 0},
+        source="lifespan",
+    ))
+
     logger.info("GitHub Mirror 启动完成！")
     yield
 
     # 关闭
+    await event_bus.publish(Event(
+        type=EventType.SYSTEM_SHUTDOWN,
+        data={"version": settings.app_version},
+        source="lifespan",
+    ))
     if github_client:
         await github_client.stop()
     logger.info("GitHub Mirror 已关闭")
@@ -153,6 +166,34 @@ def create_app() -> FastAPI:
             "version": settings.app_version,
             "docs": "/docs",
         }
+
+    # ── 事件总线 API ──
+    @app.get("/api/events")
+    async def get_events(event_type: str = None, limit: int = 50):
+        from .core.events import event_bus
+        return event_bus.get_history(event_type=event_type, limit=limit)
+
+    @app.get("/api/events/types")
+    async def get_event_types():
+        from .core.events import event_bus
+        return {"types": event_bus.event_types}
+
+    # ── 审计日志 API ──
+    @app.get("/api/audit")
+    async def get_audit_log(action: str = None, status: str = None, limit: int = 50):
+        from .core.audit import audit_log
+        return audit_log.get_entries(action=action, status=status, limit=limit)
+
+    @app.get("/api/audit/stats")
+    async def get_audit_stats():
+        from .core.audit import audit_log
+        return audit_log.get_stats()
+
+    # ── 缓存统计 API ──
+    @app.get("/api/cache/info")
+    async def get_cache_info():
+        from .core.cache_v2 import cache
+        return cache.stats
 
     return app
 

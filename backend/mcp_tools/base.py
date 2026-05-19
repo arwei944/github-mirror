@@ -159,7 +159,10 @@ class ToolRegistry:
     async def call(self, name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
         """
         调用工具并返回 MCP 格式结果
+        自动记录事件和审计日志
         """
+        import time as _time
+
         tool = self._tools.get(name)
         if not tool:
             return {
@@ -167,19 +170,67 @@ class ToolRegistry:
                 "isError": True,
             }
 
+        start = _time.time()
         logger.info(f"MCP tool call: {name}")
         try:
             result = await tool.execute(**arguments)
+            duration_ms = int((_time.time() - start) * 1000)
+
+            # 记录事件和审计
+            self._emit_event(name, arguments, result, duration_ms)
+            self._audit_log(name, "success", duration_ms, arguments)
+
             return {
                 "content": result.content,
                 "isError": result.is_error,
             }
         except Exception as e:
+            duration_ms = int((_time.time() - start) * 1000)
+            self._audit_log(name, "error", duration_ms, arguments, str(e))
             logger.exception(f"MCP tool error: {name}")
             return {
                 "content": [{"type": "text", "text": f'{{"error": "{e}"}}'}],
                 "isError": True,
             }
+
+    def _emit_event(self, name: str, arguments: dict, result, duration_ms: int):
+        """发射 MCP 工具调用事件"""
+        try:
+            from ..core.events import event_bus, Event, EventType
+            import asyncio
+            event = Event(
+                type=EventType.MCP_TOOL_CALL,
+                data={
+                    "tool": name,
+                    "arguments": {k: str(v)[:100] for k, v in arguments.items()},
+                    "is_error": result.is_error,
+                    "duration_ms": duration_ms,
+                },
+                source="mcp_registry",
+            )
+            # 尝试在运行中的事件循环中发布
+            try:
+                loop = asyncio.get_running_loop()
+                loop.create_task(event_bus.publish(event))
+            except RuntimeError:
+                asyncio.run(event_bus.publish(event))
+        except Exception:
+            pass  # 事件发布失败不影响工具调用
+
+    def _audit_log(self, name: str, status: str, duration_ms: int, arguments: dict, error: str = ""):
+        """记录审计日志"""
+        try:
+            from ..core.audit import audit_log
+            audit_log.log(
+                action="tool_call",
+                target=name,
+                status=status,
+                detail=error[:200] if error else f"args: {list(arguments.keys())}",
+                duration_ms=duration_ms,
+                metadata={"arguments": {k: str(v)[:100] for k, v in arguments.items()}},
+            )
+        except Exception:
+            pass
 
     @property
     def count(self) -> int:

@@ -14,7 +14,7 @@ from pathlib import Path
 class TestConfig:
     def test_default_version(self):
         from backend.config import settings
-        assert settings.app_version == "7.1.0"
+        assert settings.app_version == "7.3.0"
 
     def test_load_from_env(self, monkeypatch):
         monkeypatch.setenv("GITHUB_TOKEN", "test_token_123")
@@ -165,7 +165,7 @@ class TestDatabase:
 class TestMainApp:
     def test_app_creation(self):
         from backend.main import app
-        assert app.version == "7.1.0"
+        assert app.version == "7.3.0"
         assert app.title == "GitHub Mirror"
 
     def test_health_endpoint(self, monkeypatch):
@@ -178,7 +178,7 @@ class TestMainApp:
         assert resp.status_code == 200
         data = resp.json()
         assert data["status"] == "ok"
-        assert data["version"] == "7.1.0"
+        assert data["version"] == "7.3.0"
 
     def test_api_health_endpoint(self, monkeypatch):
         from backend.main import app
