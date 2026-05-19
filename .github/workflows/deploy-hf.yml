@@ -1,0 +1,31 @@
+name: Deploy to HF Space
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout GitHub repo
+        uses: actions/checkout@v4
+
+      - name: Push to HF Space
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: |
+          git clone https://arwei944:$HF_TOKEN@huggingface.co/spaces/arwei944/github-mirror /tmp/hf-space
+          cd /tmp/hf-space
+
+          # 清除旧文件（保留 .git）
+          find . -maxdepth 1 ! -name '.git' ! -name '.' -exec rm -rf {} +
+
+          # 复制新文件
+          cp -r $GITHUB_WORKSPACE/. .
+
+          git add -A
+          git -c user.name="arwei944" -c user.email="arwei944@users.noreply.github.com" \
+            commit -m "Deploy from GitHub: ${{ github.sha }}" || echo "No changes to commit"
+          git push origin main --force
