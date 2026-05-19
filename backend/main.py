@@ -55,6 +55,10 @@ async def lifespan(app: FastAPI):
     from .db.connection import init_db
     init_db()
 
+    # 2.5 初始化同步数据库（兼容旧逻辑）
+    from .core.shared_state import init_sync_db
+    init_sync_db()
+
     # 3. 注册 MCP 工具
     from .mcp_tools import register_all_tools, registry
     register_all_tools(
@@ -133,9 +137,15 @@ def create_app() -> FastAPI:
     from .routers.deploy import router as deploy_router
     from .routers.github_proxy import router as github_proxy_router
     from .routers.mcp import router as mcp_router
+    from .routers.webhooks import router as webhooks_router
+    from .routers.sync import router as sync_router
+    from .routers.system import router as system_router
     app.include_router(deploy_router)
     app.include_router(github_proxy_router)
     app.include_router(mcp_router)
+    app.include_router(webhooks_router)
+    app.include_router(sync_router)
+    app.include_router(system_router)
 
     # ── 错误处理 ──
     setup_error_handlers(app)
