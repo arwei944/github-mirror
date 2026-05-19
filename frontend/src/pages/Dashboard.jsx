@@ -400,9 +400,10 @@ export default function Dashboard({ githubRepos, onSelectRepo, onNavigate }) {
                   {event.type === 'ReleaseEvent' && event.release_body && (
                     <div style={{
                       marginTop: 6, marginLeft: 28, fontSize: 11, color: 'var(--mac-text-secondary)',
-                      overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                      maxHeight: 40, overflow: 'hidden', lineHeight: '16px',
+                      WebkitMaskImage: 'linear-gradient(to bottom, black 60%, transparent 100%)',
                     }}>
-                      {event.release_body}
+                      {event.release_body.replace(/#{1,6}\s/g, '').replace(/\*\*/g, '').replace(/```[\s\S]*?```/g, '[代码块]').slice(0, 120)}
                     </div>
                   )}
 
@@ -410,9 +411,9 @@ export default function Dashboard({ githubRepos, onSelectRepo, onNavigate }) {
                     <div style={{
                       marginTop: 6, marginLeft: 28, fontSize: 11, color: 'var(--mac-text-secondary)',
                       padding: 6, borderRadius: 6, background: 'var(--mac-bg)',
-                      overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                      maxHeight: 32, overflow: 'hidden', lineHeight: '16px',
                     }}>
-                      💬 {event.comment_body}
+                      💬 {event.comment_body.slice(0, 80)}
                     </div>
                   )}
                 </div>
