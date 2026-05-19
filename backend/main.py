@@ -132,8 +132,10 @@ def create_app() -> FastAPI:
     # ── 路由挂载 ──
     from .routers.deploy import router as deploy_router
     from .routers.github_proxy import router as github_proxy_router
+    from .routers.mcp import router as mcp_router
     app.include_router(deploy_router)
     app.include_router(github_proxy_router)
+    app.include_router(mcp_router)
 
     # ── 错误处理 ──
     setup_error_handlers(app)
