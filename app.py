@@ -5676,7 +5676,7 @@ async def _mcp_sse_generator(session_id: str):
     _mcp_sessions[session_id] = queue
     try:
         # 发送 endpoint 提示
-        yield f"event: endpoint\ndata: /mcp/message?session_id={session_id}\n\n"
+        yield f"event: endpoint\ndata: message?session_id={session_id}\n\n"
         while True:
             try:
                 msg = await asyncio.wait_for(queue.get(), timeout=30.0)
@@ -5705,7 +5705,7 @@ async def mcp_sse_endpoint(request: Request):
     )
 
 
-@app.post("/mcp/message")
+@app.post("/mcp/sse/message")
 async def mcp_message_endpoint(request: Request):
     """MCP 消息处理端点 - 接收客户端 JSON-RPC 消息"""
     try:
