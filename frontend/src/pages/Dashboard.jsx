@@ -422,7 +422,16 @@ export default function Dashboard({ githubRepos, onSelectRepo, onNavigate }) {
         </div>
 
         {/* Right column */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+        <div style={{
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 16,
+          position: 'sticky',
+          top: 16,
+          maxHeight: 'calc(100vh - 32px)',
+          overflowY: 'auto',
+          alignSelf: 'start',
+        }}>
           {/* Trending repos */}
           <div style={cardStyle}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
