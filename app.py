@@ -5676,7 +5676,7 @@ async def _mcp_sse_generator(session_id: str):
     _mcp_sessions[session_id] = queue
     try:
         # 发送 endpoint 提示
-        yield f"event: endpoint\ndata: sse/message?session_id={session_id}\n\n"
+        yield f"event: endpoint\ndata: /sse/message?session_id={session_id}\n\n"
         while True:
             try:
                 msg = await asyncio.wait_for(queue.get(), timeout=30.0)
