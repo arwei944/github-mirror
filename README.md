@@ -1,6 +1,6 @@
 ---
 title: GitHub Mirror
-emoji: mirror
+emoji: 🪞
 colorFrom: blue
 colorTo: indigo
 sdk: docker
