@@ -129,6 +129,10 @@ def create_app() -> FastAPI:
     setup_rate_limit_middleware(app)
     setup_cache_middleware(app)
 
+    # ── 路由挂载 ──
+    from .routers.deploy import router as deploy_router
+    app.include_router(deploy_router)
+
     # ── 错误处理 ──
     setup_error_handlers(app)
 
