@@ -5670,13 +5670,13 @@ async def _mcp_call_tool(name: str, arguments: Dict[str, Any]) -> Dict[str, Any]
 _mcp_sessions: Dict[str, asyncio.Queue] = {}
 
 
-async def _mcp_sse_generator(session_id: str):
+async def _mcp_sse_generator(session_id: str, base_url: str):
     """SSE 事件生成器，持续向客户端推送消息"""
     queue = asyncio.Queue()
     _mcp_sessions[session_id] = queue
     try:
-        # 发送 endpoint 提示
-        yield f"event: endpoint\ndata: /sse/message?session_id={session_id}\n\n"
+        # 返回完整的绝对 URL，避免客户端 URL 拼接问题
+        yield f"event: endpoint\ndata: {base_url}/mcp/sse/message?session_id={session_id}\n\n"
         while True:
             try:
                 msg = await asyncio.wait_for(queue.get(), timeout=30.0)
@@ -5694,8 +5694,9 @@ async def _mcp_sse_generator(session_id: str):
 async def mcp_sse_endpoint(request: Request):
     """MCP SSE 端点 - 建立 Server-Sent Events 连接"""
     session_id = str(uuid.uuid4())
+    base_url = str(request.base_url).rstrip('/')
     return StreamingResponse(
-        _mcp_sse_generator(session_id),
+        _mcp_sse_generator(session_id, base_url),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
