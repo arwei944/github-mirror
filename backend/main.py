@@ -55,7 +55,18 @@ async def lifespan(app: FastAPI):
     from .db.connection import init_db
     init_db()
 
-    # 3. 初始化同步数据库（兼容旧逻辑）
+    # 3. 注册 MCP 工具
+    from .mcp_tools import register_all_tools, registry
+    register_all_tools(
+        github_client=github_client,
+        github_user=settings.github_user,
+        hf_token=settings.hf_token,
+        hf_user=settings.hf_user,
+        settings=settings,
+    )
+    logger.info(f"MCP 工具已注册: {registry.count} 个工具")
+
+    # 4. 初始化同步数据库（兼容旧逻辑）
     try:
         from .db.connection import _db_path
         logger.info(f"数据库路径: {_db_path}")
