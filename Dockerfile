@@ -10,7 +10,7 @@ RUN npm run build
 FROM python:3.11-slim
 
 LABEL maintainer="arwei944"
-LABEL version="7.5.0"
+LABEL version="7.6.0"
 LABEL description="GitHub Mirror - Complete GitHub Mirror Platform with MCP"
 
 # 安装运行时依赖（不安装构建工具）
