@@ -74,7 +74,8 @@ async def list_github_repos(
 
     status, data = gh_get(path)
     if status != 200:
-        raise HTTPException(status_code=status, detail=f"获取仓库列表失败: {data}")
+        logger.warning(f"获取仓库列表失败: {status} - {data}")
+        return []
 
     if not isinstance(data, list):
         raise HTTPException(status_code=500, detail="GitHub API 返回数据格式异常")

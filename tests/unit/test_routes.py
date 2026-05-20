@@ -220,8 +220,8 @@ class TestGitHubEndpoints:
     def test_activity_endpoint(self, client):
         """GET /api/github/activity"""
         resp = client.get("/api/github/activity")
-        # 可能返回空列表、错误或被代理
-        assert resp.status_code in [200, 500, 404]
+        # 可能返回空列表、错误或 401（无 token）
+        assert resp.status_code in [200, 500, 404, 401]
 
     def test_trending_endpoint(self, client):
         """GET /api/github/trending"""

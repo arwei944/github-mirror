@@ -125,20 +125,21 @@ def create_app() -> FastAPI:
     setup_cache_middleware(app)
 
     # ── 路由挂载 ──
+    # 注意：具体路由必须在 catch-all 代理之前挂载
     from .routers.deploy import router as deploy_router
-    from .routers.github_proxy import router as github_proxy_router
     from .routers.github_repos import router as github_repos_router
     from .routers.github_actions import router as github_actions_router
     from .routers.github_misc import router as github_misc_router
+    from .routers.github_proxy import router as github_proxy_router
     from .routers.mcp import router as mcp_router
     from .routers.webhooks import router as webhooks_router
     from .routers.sync import router as sync_router
     from .routers.system import router as system_router
     app.include_router(deploy_router)
-    app.include_router(github_proxy_router)
-    app.include_router(github_repos_router)
+    app.include_router(github_repos_router)   # 具体路由先挂载
     app.include_router(github_actions_router)
     app.include_router(github_misc_router)
+    app.include_router(github_proxy_router)   # catch-all 最后挂载
     app.include_router(mcp_router)
     app.include_router(webhooks_router)
     app.include_router(sync_router)
