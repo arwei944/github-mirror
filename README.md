@@ -10,12 +10,13 @@ pinned: false
 
 # 🪞 GitHub Mirror
 
-完整的 GitHub 镜像平台，支持 MCP 协议，提供 227+ API 端点。
+完整的 GitHub 镜像平台，支持 MCP 协议，提供 195+ API 端点。
 
 ## ✨ 功能特性
 
-- **GitHub API 完整代理** — 仓库、Issues、PRs、Actions、Search 等 227+ 端点
+- **GitHub API 完整代理** — 仓库、Issues、PRs、Actions、Search 等 195+ 端点
 - **MCP 服务端** — SSE + Streamable HTTP 双传输协议，30 个工具（GitHub/HF/Shell/Proxy/项目/配置）
+- **模块化架构** — 10 个独立路由模块，完全解耦
 - **Shell 命令执行** — 白名单安全限制 + 超时控制
 - **HTTP 代理工具** — URL 黑名单 + DNS Rebinding 防护
 - **实时活动流** — WebSocket + SSE 双通道
@@ -27,7 +28,7 @@ pinned: false
 
 ### 环境要求
 
-- Python 3.11+
+- Python 3.10+
 - Node.js 20+（前端构建）
 - Docker（可选）
 
@@ -49,7 +50,7 @@ pip install -r requirements.txt
 cd frontend && npm install && npm run build && cd ..
 
 # 5. 启动服务
-uvicorn app:app --host 0.0.0.0 --port 7860
+uvicorn backend.main:app --host 0.0.0.0 --port 7860
 ```
 
 ### Docker 部署
@@ -131,19 +132,52 @@ SSE 端点：`GET /mcp/sse`
 ## 📁 项目结构
 
 ```
-├── app.py              # FastAPI 后端（227+ API 端点）
-├── requirements.txt    # Python 依赖
-├── Dockerfile          # Docker 多阶段构建
-├── frontend/           # React 前端
+├── backend/                 # 模块化后端
+│   ├── main.py              # FastAPI 入口
+│   ├── config.py            # Pydantic Settings
+│   ├── routers/             # 路由模块
+│   │   ├── github_repos.py  # 仓库 API (178 handlers)
+│   │   ├── github_actions.py# Actions API (20 handlers)
+│   │   ├── github_misc.py   # 杂项 API (9 handlers)
+│   │   ├── github_proxy.py  # Catch-all 代理
+│   │   ├── mcp.py           # MCP 协议
+│   │   ├── webhooks.py      # Webhook 接收
+│   │   ├── sync.py          # 数据同步
+│   │   ├── system.py        # 系统管理
+│   │   └── deploy.py        # HF 部署
+│   ├── core/                # 核心模块
+│   │   ├── events.py        # 事件总线
+│   │   ├── cache_v2.py      # LRU 缓存
+│   │   ├── audit.py         # 审计日志
+│   │   └── shared_state.py  # 共享状态
+│   ├── mcp_tools/           # MCP 工具集
+│   │   ├── base.py          # BaseTool + Registry
+│   │   ├── github_tools.py  # 21 GitHub 工具
+│   │   ├── hf_tools.py      # 3 HF 工具
+│   │   ├── shell_tools.py   # Shell 工具
+│   │   └── ...
+│   └── clients/             # HTTP 客户端
+│       └── github_client.py # Async httpx 客户端
+├── frontend/                # React 前端
 │   ├── src/
-│   │   ├── App.jsx         # 主应用（路由 + 状态）
-│   │   ├── api.js          # API 层（去重 + 重试）
-│   │   ├── pages/          # 22 个页面组件
-│   │   ├── components/     # 通用组件
-│   │   └── utils/          # 工具函数
+│   │   ├── App.jsx          # 主应用
+│   │   ├── api.js           # API 层
+│   │   ├── pages/           # 22 个页面组件
+│   │   └── hooks/           # 自定义 Hooks
 │   └── package.json
-├── static/             # 前端构建产物
-└── data/               # 运行时数据
+├── static/                  # 前端构建产物
+├── tests/                   # 单元测试 (88 tests)
+└── data/                    # 运行时数据
+```
+
+## 🧪 测试
+
+```bash
+# 运行所有测试
+python -m pytest tests/ -v
+
+# 运行特定测试
+python -m pytest tests/unit/test_routes.py -v
 ```
 
 ## 📄 License
