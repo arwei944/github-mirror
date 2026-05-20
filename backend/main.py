@@ -1,6 +1,6 @@
 """
 FastAPI 应用入口
-v7.3.0 - Phase 3 路由拆分
+v7.5.0 - 完全独立路由架构（移除 app.py 桥接层）
 
 启动方式:
     uvicorn backend.main:app --host 0.0.0.0 --port 7860 --reload
@@ -70,20 +70,11 @@ async def lifespan(app: FastAPI):
     )
     logger.info(f"MCP 工具已注册: {registry.count} 个工具")
 
-    # 4. 桥接 app.py 的所有路由（Phase 3 兼容层）
-    from .routers.registry import register_app_routes
-    try:
-        import app as legacy_app
-        route_count = register_app_routes(app, legacy_app)
-        logger.info(f"已从 app.py 桥接 {route_count} 个 API 路由")
-    except Exception as e:
-        logger.error(f"桥接 app.py 路由失败: {e}")
-
-    # 5. 发射启动事件
+    # 4. 发射启动事件
     from .core.events import event_bus, Event, EventType
     await event_bus.publish(Event(
         type=EventType.SYSTEM_STARTUP,
-        data={"version": settings.app_version, "routes": route_count if 'route_count' in dir() else 0},
+        data={"version": settings.app_version},
         source="lifespan",
     ))
 
@@ -136,12 +127,18 @@ def create_app() -> FastAPI:
     # ── 路由挂载 ──
     from .routers.deploy import router as deploy_router
     from .routers.github_proxy import router as github_proxy_router
+    from .routers.github_repos import router as github_repos_router
+    from .routers.github_actions import router as github_actions_router
+    from .routers.github_misc import router as github_misc_router
     from .routers.mcp import router as mcp_router
     from .routers.webhooks import router as webhooks_router
     from .routers.sync import router as sync_router
     from .routers.system import router as system_router
     app.include_router(deploy_router)
     app.include_router(github_proxy_router)
+    app.include_router(github_repos_router)
+    app.include_router(github_actions_router)
+    app.include_router(github_misc_router)
     app.include_router(mcp_router)
     app.include_router(webhooks_router)
     app.include_router(sync_router)
