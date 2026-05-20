@@ -6,9 +6,16 @@ export default defineConfig({
   build: {
     outDir: '../static',
     emptyOutDir: true,
-    // 代码分割策略
+    // 添加版本戳到 chunk 文件名，强制 CDN 刷新
     rollupOptions: {
       output: {
+        entryFileNames: 'assets/[name]-[hash]-v7.5.0.js',
+        chunkFileNames: 'assets/[name]-[hash]-v7.5.0.js',
+        assetFileNames: (assetInfo) => {
+          const info = assetInfo.name.split('.')
+          const ext = info[info.length - 1]
+          return `assets/[name]-[hash][extname]`
+        },
         manualChunks: {
           // React 核心（几乎每个页面都需要）
           'vendor-react': ['react', 'react-dom'],
