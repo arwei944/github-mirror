@@ -1,8 +1,9 @@
 // 版本号统一管理 - 修改版本时只需改这里
-export const APP_VERSION = 'v7.4.0'
+export const APP_VERSION = 'v7.5.0'
 
 // 版本历史（仅版本号和日期，详细变更记录在 About.jsx 中维护）
 export const VERSION_HISTORY = [
+  { version: 'v7.5.0', date: '2026-05-20' },
   { version: 'v7.4.0', date: '2026-05-19' },
   { version: 'v7.3.0', date: '2026-05-19' },
   { version: 'v7.2.0', date: '2026-05-19' },
