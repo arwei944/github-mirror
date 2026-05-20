@@ -59,7 +59,8 @@ async def list_github_repos(
     获取 GitHub 仓库列表
     """
     if not settings.github_token:
-        raise HTTPException(status_code=500, detail="未配置 GITHUB_TOKEN 环境变量")
+        logger.warning("未配置 GITHUB_TOKEN，返回空仓库列表")
+        return []
 
     # 构建查询参数
     params = {

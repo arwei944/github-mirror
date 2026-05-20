@@ -266,10 +266,9 @@ async def get_github_activity(
     """
     获取 GitHub 活动流
     """
-    if not settings.github_token:
-        raise HTTPException(status_code=500, detail="未配置 GITHUB_TOKEN 环境变量")
-    if not settings.github_user:
-        raise HTTPException(status_code=500, detail="未配置 GITHUB_USER 环境变量")
+    if not settings.github_token or not settings.github_user:
+        logger.warning("未配置 GITHUB_TOKEN/GITHUB_USER，返回空活动列表")
+        return []
 
     path = f"/users/{settings.github_user}/events?per_page={per_page}&page={page}"
     status, data = gh_get(path)
@@ -291,10 +290,9 @@ async def get_aggregated_activity(
     """
     获取聚合活动流 - 用户事件 + 所有仓库事件 (v5.4.5)
     """
-    if not settings.github_token:
-        raise HTTPException(status_code=500, detail="未配置 GITHUB_TOKEN 环境变量")
-    if not settings.github_user:
-        raise HTTPException(status_code=500, detail="未配置 GITHUB_USER 环境变量")
+    if not settings.github_token or not settings.github_user:
+        logger.warning("未配置 GITHUB_TOKEN/GITHUB_USER，返回空聚合活动列表")
+        return []
 
     all_events = []
     seen_ids = set()
@@ -569,6 +567,10 @@ async def get_trending_repos(
     since: str = Query("daily", description="时间范围: daily, weekly, monthly"),
 ):
     """获取 GitHub 热门项目 (v5.4.2) - 通过搜索 API 模拟"""
+    if not settings.github_token:
+        logger.warning("未配置 GITHUB_TOKEN，返回空热门项目列表")
+        return []
+    
     query_parts = ["stars:>100", "fork:true"]
     if language:
         query_parts.append(f"language:{language}")

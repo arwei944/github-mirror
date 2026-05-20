@@ -168,28 +168,36 @@ export default function Dashboard({ githubRepos, onSelectRepo, onNavigate }) {
   const [trending, setTrending] = useState([])
   const [stats, setStats] = useState({ repos: 0, stars: 0, issues: 0, prs: 0, forks: 0 })
   const [loading, setLoading] = useState(true)
-
-  const repos = Array.isArray(githubRepos) ? githubRepos : []
+  const [trendingLoading, setTrendingLoading] = useState(true)
+  const [repos, setRepos] = useState([])
 
   const loadData = useCallback(async () => {
     setLoading(true)
+    setTrendingLoading(true)
     try {
-      const [act, star, trend, webhookEvents] = await Promise.all([
+      // 同时获取仓库列表和其他数据
+      const [act, star, trend, webhookEvents, reposData] = await Promise.all([
         api.get('/api/github/activity/aggregated').catch(() => []),
         api.get('/api/github/user/starred?sort=updated&per_page=5').catch(() => []),
         api.get('/api/github/trending?since=daily').catch(() => []),
         api.get('/api/webhooks/events?per_page=10').catch(() => []),
+        api.get('/api/github/repos').catch(() => []),
       ])
       setActivities(Array.isArray(act) ? act.slice(0, 15) : [])
       setStarred(Array.isArray(star) ? star : [])
       setTrending(Array.isArray(trend) ? trend : [])
-
+      setTrendingLoading(false)
+      
+      // 使用 API 获取的仓库数据
+      const repoList = Array.isArray(reposData) ? reposData : []
+      setRepos(repoList)
+      
       // Calculate stats from repos
-      const totalStars = repos.reduce((s, r) => s + (r.stargazers_count || 0), 0)
-      const totalForks = repos.reduce((s, r) => s + (r.forks_count || 0), 0)
-      const totalIssues = repos.reduce((s, r) => s + (r.open_issues_count || 0), 0)
+      const totalStars = repoList.reduce((s, r) => s + (r.stargazers_count || 0), 0)
+      const totalForks = repoList.reduce((s, r) => s + (r.forks_count || 0), 0)
+      const totalIssues = repoList.reduce((s, r) => s + (r.open_issues_count || 0), 0)
       setStats({
-        repos: repos.length,
+        repos: repoList.length,
         stars: totalStars,
         issues: totalIssues,
         prs: totalIssues, // open_issues includes PRs in GitHub API
@@ -199,20 +207,11 @@ export default function Dashboard({ githubRepos, onSelectRepo, onNavigate }) {
       console.error('Dashboard load error:', err)
     } finally {
       setLoading(false)
+      setTrendingLoading(false)
     }
   }, [])
 
   useEffect(() => { loadData() }, [])
-
-  // 当 repos 数据到达时更新统计
-  useEffect(() => {
-    if (repos.length > 0) {
-      const totalStars = repos.reduce((s, r) => s + (r.stargazers_count || 0), 0)
-      const totalForks = repos.reduce((s, r) => s + (r.forks_count || 0), 0)
-      const totalIssues = repos.reduce((s, r) => s + (r.open_issues_count || 0), 0)
-      setStats({ repos: repos.length, stars: totalStars, issues: totalIssues, forks: totalForks })
-    }
-  }, [repos.length])
 
   const statCards = [
     { label: '仓库', value: stats.repos, icon: Icon.repo(18, '#0066cc'), color: '#0066cc' },
@@ -440,8 +439,10 @@ export default function Dashboard({ githubRepos, onSelectRepo, onNavigate }) {
                 {Icon.activity(16, '#3fb950')} GitHub 热门项目
               </span>
             </div>
-            {trending.length === 0 ? (
+            {trendingLoading ? (
               <div style={{ textAlign: 'center', padding: 20, color: 'var(--mac-text-secondary)', fontSize: 12 }}>加载中...</div>
+            ) : trending.length === 0 ? (
+              <div style={{ textAlign: 'center', padding: 20, color: 'var(--mac-text-secondary)', fontSize: 12 }}>暂无热门项目</div>
             ) : (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
                 {trending.map((repo, i) => (
