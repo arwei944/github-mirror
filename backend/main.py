@@ -88,7 +88,7 @@ async def lifespan(app: FastAPI):
 
     # 3.6 手动启动 FastMCP 的 session_manager（因为作为子应用挂载时 lifespan 不会自动执行）
     _mcp_task = asyncio.create_task(_run_mcp_session_manager(fast_mcp))
-    logger.info("FastMCP SDK 已初始化（Streamable HTTP）")
+    logger.info("FastMCP SDK 已初始化（Streamable HTTP + SSE）")
 
     # 4. 发射启动事件
     from .core.events import event_bus, Event, EventType
@@ -176,6 +176,11 @@ def create_app() -> FastAPI:
     from .mcp_server import mcp as fast_mcp
     mcp_starlette_app = fast_mcp.streamable_http_app()
     app.mount("/mcp", mcp_starlette_app)
+
+    # ── MCP SSE（兼容旧客户端）──
+    # 挂载到 /mcp/sse，客户端可通过 SSE 协议连接
+    mcp_sse_app = fast_mcp.sse_app()
+    app.mount("/mcp/sse", mcp_sse_app)
 
     # ── 错误处理 ──
     setup_error_handlers(app)
