@@ -1,7 +1,7 @@
 """
-MCP 传输层路由
-JSON-RPC 处理 + SSE 传输 + Streamable HTTP
-使用 ToolRegistry 分发工具调用（替代旧 if-elif 链）
+MCP 工具调用历史 API
+注意：MCP 协议端点（/mcp）已迁移到官方 FastMCP SDK（见 mcp_server.py）
+本模块仅保留工具调用历史查询等管理 API
 """
 import asyncio
 import json
@@ -20,9 +20,6 @@ logger = logging.getLogger("github-mirror.routers.mcp")
 
 router = APIRouter(tags=["mcp"])
 
-# SSE 会话管理
-_mcp_sessions: Dict[str, asyncio.Queue] = {}
-
 # 工具调用历史
 _mcp_tool_calls: list = []
 _MCP_TOOL_CALLS_MAX = 200
@@ -35,9 +32,9 @@ EVENT_TYPE_LABELS = {
 }
 
 
-def _record_tool_call(tool_name: str, arguments: dict, result: dict,
-                      session_id: str = ""):
-    """记录 MCP 工具调用到历史"""
+def record_tool_call(tool_name: str, arguments: dict, result: dict,
+                     session_id: str = ""):
+    """记录 MCP 工具调用到历史（供外部调用）"""
     if tool_name == "execute_shell":
         event_type = "McpShellEvent"
     elif tool_name == "proxy_request":
@@ -93,145 +90,6 @@ def _record_tool_call(tool_name: str, arguments: dict, result: dict,
         loop.create_task(event_bus.publish(evt))
     except Exception:
         pass
-
-
-async def _handle_jsonrpc(body: dict, session_id: str = "") -> JSONResponse:
-    """处理 MCP JSON-RPC 请求"""
-    jsonrpc = body.get("jsonrpc", "2.0")
-    method = body.get("method", "")
-    params = body.get("params", {})
-    msg_id = body.get("id")
-
-    if method == "initialize":
-        result = {
-            "protocolVersion": "2025-11-25",
-            "capabilities": {"tools": {"listChanged": False}},
-            "serverInfo": {
-                "name": "github-mirror-mcp",
-                "version": settings.app_version,
-            },
-        }
-        return JSONResponse(content={"jsonrpc": jsonrpc, "result": result, "id": msg_id})
-
-    elif method == "notifications/initialized":
-        return JSONResponse(content={})
-
-    elif method == "tools/list":
-        tools_list = [
-            {
-                "name": t["name"],
-                "description": t["description"],
-                "inputSchema": t["inputSchema"],
-            }
-            for t in registry.list_tools()
-        ]
-        return JSONResponse(content={"jsonrpc": jsonrpc, "result": {"tools": tools_list}, "id": msg_id})
-
-    elif method == "tools/call":
-        tool_name = params.get("name", "")
-        tool_args = params.get("arguments", {})
-
-        # 使用 ToolRegistry 分发（替代旧 if-elif 链）
-        result = await registry.call(tool_name, tool_args)
-
-        # 记录工具调用
-        _record_tool_call(tool_name, tool_args, result, session_id=session_id)
-
-        # SSE 会话推送
-        if session_id and session_id in _mcp_sessions:
-            try:
-                _mcp_sessions[session_id].put_nowait({
-                    "jsonrpc": jsonrpc, "result": result, "id": msg_id,
-                })
-            except asyncio.QueueFull:
-                pass
-
-        return JSONResponse(content={"jsonrpc": jsonrpc, "result": result, "id": msg_id})
-
-    elif method == "ping":
-        return JSONResponse(content={"jsonrpc": jsonrpc, "result": {}, "id": msg_id})
-
-    else:
-        return JSONResponse(content={
-            "jsonrpc": jsonrpc,
-            "error": {"code": -32601, "message": f"Method not found: {method}"},
-            "id": msg_id,
-        })
-
-
-async def _sse_generator(session_id: str, base_url: str):
-    """SSE 事件生成器"""
-    queue = asyncio.Queue()
-    _mcp_sessions[session_id] = queue
-    try:
-        yield f"event: endpoint\ndata: {base_url}/mcp/sse/message?session_id={session_id}\n\n"
-        while True:
-            try:
-                msg = await asyncio.wait_for(queue.get(), timeout=30.0)
-                yield f"data: {json.dumps(msg, ensure_ascii=False)}\n\n"
-            except asyncio.TimeoutError:
-                yield f": keepalive\n\n"
-    except asyncio.CancelledError:
-        pass
-    finally:
-        _mcp_sessions.pop(session_id, None)
-
-
-# ═══════════════════════════════════════════════════════════
-#  端点定义
-# ═══════════════════════════════════════════════════════════
-
-@router.get("/mcp/sse")
-async def mcp_sse(request: Request):
-    """MCP SSE 端点"""
-    session_id = str(uuid.uuid4())
-    base_url = str(request.base_url).rstrip('/')
-    return StreamingResponse(
-        _sse_generator(session_id, base_url),
-        media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-            "X-Accel-Buffering": "no",
-        },
-    )
-
-
-@router.post("/mcp/sse/message")
-async def mcp_sse_message(request: Request):
-    """MCP SSE 消息处理"""
-    try:
-        body = await request.json()
-    except Exception:
-        return JSONResponse(
-            status_code=400,
-            content={"jsonrpc": "2.0", "error": {"code": -32700, "message": "Parse error"}, "id": None},
-        )
-    session_id = request.query_params.get("session_id", "")
-    return await _handle_jsonrpc(body, session_id=session_id)
-
-
-@router.post("/mcp")
-async def mcp_streamable(request: Request):
-    """MCP Streamable HTTP 端点"""
-    try:
-        body = await request.json()
-    except Exception:
-        return JSONResponse(
-            status_code=400,
-            content={"jsonrpc": "2.0", "error": {"code": -32700, "message": "Parse error"}, "id": None},
-        )
-    return await _handle_jsonrpc(body)
-
-
-@router.get("/mcp")
-@router.get("/mcp/sse/message")
-async def mcp_probe():
-    """MCP 探测端点"""
-    return JSONResponse(
-        status_code=405,
-        content={"error": "Method Not Allowed", "message": "Use POST for MCP requests"},
-    )
 
 
 # ═══════════════════════════════════════════════════════════

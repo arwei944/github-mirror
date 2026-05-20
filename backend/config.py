@@ -11,7 +11,7 @@ class AppSettings(BaseSettings):
     """应用配置 - 集中管理所有环境变量"""
 
     # ── 应用 ──
-    app_version: str = "7.6.0"
+    app_version: str = "7.7.0"
     debug: bool = False
 
     # ── GitHub ──

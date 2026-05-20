@@ -1,12 +1,13 @@
 """
 FastAPI 应用入口
-v7.5.0 - 完全独立路由架构（移除 app.py 桥接层）
+v7.7.0 - 使用官方 MCP Python SDK (FastMCP) 替换手写 MCP 协议实现
 
 启动方式:
     uvicorn backend.main:app --host 0.0.0.0 --port 7860 --reload
 """
 import logging
 import os
+import asyncio
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -26,6 +27,15 @@ logger = logging.getLogger("github-mirror")
 
 # 全局 GitHub 客户端实例
 github_client = None
+
+
+async def _run_mcp_session_manager(fast_mcp):
+    """在后台运行 FastMCP 的 session_manager（task group 初始化）"""
+    try:
+        async with fast_mcp.session_manager.run():
+            await asyncio.Event().wait()  # 永久阻塞，直到被取消
+    except asyncio.CancelledError:
+        pass
 
 
 # ═══════════════════════════════════════════════════════════
@@ -59,7 +69,7 @@ async def lifespan(app: FastAPI):
     from .core.shared_state import init_sync_db
     init_sync_db()
 
-    # 3. 注册 MCP 工具
+    # 3. 注册 MCP 工具到 ToolRegistry（保留旧系统兼容）
     from .mcp_tools import register_all_tools, registry
     register_all_tools(
         github_client=github_client,
@@ -69,6 +79,16 @@ async def lifespan(app: FastAPI):
         settings=settings,
     )
     logger.info(f"MCP 工具已注册: {registry.count} 个工具")
+
+    # 3.5 将工具桥接到 FastMCP（官方 SDK）
+    from .mcp_server import mcp as fast_mcp, register_tools_from_registry
+    register_tools_from_registry(registry)
+    # 设置自定义版本号
+    fast_mcp._mcp_server.version = settings.app_version
+
+    # 3.6 手动启动 FastMCP 的 session_manager（因为作为子应用挂载时 lifespan 不会自动执行）
+    _mcp_task = asyncio.create_task(_run_mcp_session_manager(fast_mcp))
+    logger.info("FastMCP SDK 已初始化（Streamable HTTP）")
 
     # 4. 发射启动事件
     from .core.events import event_bus, Event, EventType
@@ -82,6 +102,11 @@ async def lifespan(app: FastAPI):
     yield
 
     # 关闭
+    _mcp_task.cancel()
+    try:
+        await _mcp_task
+    except asyncio.CancelledError:
+        pass
     await event_bus.publish(Event(
         type=EventType.SYSTEM_SHUTDOWN,
         data={"version": settings.app_version},
@@ -106,7 +131,7 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
 
-    # ── CORS ──
+    # ── CORS（暴露 Mcp-Session-Id 给 MCP 客户端）──
     origins = [o.strip() for o in settings.cors_origins.split(",") if o.strip()]
     app.add_middleware(
         CORSMiddleware,
@@ -114,6 +139,7 @@ def create_app() -> FastAPI:
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
+        expose_headers=["Mcp-Session-Id", "WWW-Authenticate"],
     )
 
     # ── 中间件（顺序：auth → rate_limit → cache）──
@@ -140,10 +166,16 @@ def create_app() -> FastAPI:
     app.include_router(github_actions_router)
     app.include_router(github_misc_router)
     app.include_router(github_proxy_router)   # catch-all 最后挂载
-    app.include_router(mcp_router)
+    app.include_router(mcp_router)           # 保留旧 MCP API（工具调用历史等）
     app.include_router(webhooks_router)
     app.include_router(sync_router)
     app.include_router(system_router)
+
+    # ── MCP Streamable HTTP（官方 SDK）──
+    # FastMCP 内部 streamable_http_path="/"，挂载到 /mcp
+    from .mcp_server import mcp as fast_mcp
+    mcp_starlette_app = fast_mcp.streamable_http_app()
+    app.mount("/mcp", mcp_starlette_app)
 
     # ── 错误处理 ──
     setup_error_handlers(app)
