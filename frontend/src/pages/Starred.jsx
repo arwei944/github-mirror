@@ -41,12 +41,25 @@ async function translateToZh(text) {
   return text
 }
 
+const LANG_OPTIONS = [
+  { value: 'zh-CN', label: '简体中文' },
+  { value: 'zh-TW', label: '繁體中文' },
+  { value: 'ja', label: '日本語' },
+  { value: 'ko', label: '한국어' },
+  { value: 'fr', label: 'Français' },
+  { value: 'de', label: 'Deutsch' },
+  { value: 'es', label: 'Español' },
+  { value: 'ru', label: 'Русский' },
+]
+
 export default function Starred({ onSelectRepo }) {
   const [repos, setRepos] = useState([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
   const [sort, setSort] = useState('updated')
   const [page, setPage] = useState(1)
+  const [targetLang, setTargetLang] = useState(() => localStorage.getItem('github-mirror-starred-lang') || 'zh-CN')
+  const [translating, setTranslating] = useState(false)
   const [translations, setTranslationsLocal] = useState(() => getTranslations())
 
   const PER_PAGE = 20
@@ -66,6 +79,10 @@ export default function Starred({ onSelectRepo }) {
 
   useEffect(() => { loadStarred() }, [loadStarred])
 
+  useEffect(() => {
+    localStorage.setItem('github-mirror-starred-lang', targetLang)
+  }, [targetLang])
+
   // Translate descriptions when repos change
   useEffect(() => {
     let cancelled = false
@@ -74,7 +91,12 @@ export default function Starred({ onSelectRepo }) {
       const desc = r.description || ''
       if (!desc) return false
       const key = desc.trim().toLowerCase()
-      return !cache[key]
+      const cached = cache[key]
+      // 兼容旧版字符串缓存，非当前目标语言时重新翻译
+      if (!cached) return true
+      if (typeof cached === 'string') return targetLang !== 'zh-CN'
+      if (typeof cached === 'object' && cached.lang === targetLang) return false
+      return true
     })
 
     if (missing.length === 0) {
@@ -83,37 +105,52 @@ export default function Starred({ onSelectRepo }) {
     }
 
     ;(async () => {
+      setTranslating(true)
       const updated = { ...cache }
-      for (const repo of missing.slice(0, 20)) {
+      const batchSize = 5
+      const delayMs = 600
+
+      for (let i = 0; i < missing.length; i += batchSize) {
         if (cancelled) return
-        const desc = repo.description || ''
-        const key = desc.trim().toLowerCase()
-        if (!updated[key]) {
+        const batch = missing.slice(i, i + batchSize)
+
+        await Promise.all(batch.map(async (repo) => {
+          const desc = repo.description || ''
+          const key = desc.trim().toLowerCase()
+          if (updated[key] && typeof updated[key] === 'object' && updated[key].lang === targetLang) return
+
           try {
-            const url = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(desc)}&langpair=en|zh-CN`
+            const url = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(desc)}&langpair=en|${targetLang}`
             const res = await fetch(url)
             const data = await res.json()
             const translated = data?.responseData?.translatedText || desc
-            updated[key] = translated
+            updated[key] = { lang: targetLang, text: translated }
           } catch (e) {
-            updated[key] = desc
+            updated[key] = { lang: targetLang, text: desc }
           }
+        }))
+
+        if (i + batchSize < missing.length && !cancelled) {
+          await new Promise(r => setTimeout(r, delayMs))
         }
       }
+
       if (!cancelled) {
         setTranslations(updated)
         setTranslationsLocal(updated)
       }
+      setTranslating(false)
     })()
 
     return () => { cancelled = true }
-  }, [repos])
+  }, [repos, targetLang])
 
   const filtered = repos.filter(r => {
     const q = search.trim().toLowerCase()
     if (!q) return true
-    const descKey = (r.description || '').toLowerCase()
-    const translatedDesc = translations[r.description?.trim().toLowerCase()] || descKey
+    const desc = r.description || ''
+    const descKey = desc.toLowerCase()
+    const translatedDesc = getTranslatedText(desc) || descKey
     return (
       (r.full_name || r.name || '').toLowerCase().includes(q) ||
       descKey.includes(q) ||
@@ -130,13 +167,22 @@ export default function Starred({ onSelectRepo }) {
     if (page !== safePage) setPage(safePage)
   }, [safePage, page])
 
-  useEffect(() => { setPage(1) }, [search, sort])
+  useEffect(() => { setPage(1) }, [search, sort, targetLang])
+
+  const getTranslatedText = (desc) => {
+    if (!desc) return ''
+    const key = desc.trim().toLowerCase()
+    const cached = translations[key]
+    if (!cached) return ''
+    if (typeof cached === 'string') return cached
+    if (typeof cached === 'object' && cached.text) return cached.text
+    return ''
+  }
 
   const getDisplayDescription = (repo) => {
     const desc = repo.description || '暂无描述'
     if (!repo.description) return desc
-    const key = repo.description.trim().toLowerCase()
-    return translations[key] || desc
+    return getTranslatedText(desc) || desc
   }
 
   return (
@@ -163,6 +209,17 @@ export default function Starred({ onSelectRepo }) {
             <option value="pushed">最近推送</option>
             <option value="full_name">名称排序</option>
           </select>
+          <select value={targetLang} onChange={e => setTargetLang(e.target.value)} style={{
+            background: 'var(--mac-surface)', border: '1px solid var(--mac-border)',
+            borderRadius: 8, padding: '5px 8px', color: 'var(--mac-text)', fontSize: 12, outline: 'none',
+          }}>
+            {LANG_OPTIONS.map(opt => (
+              <option key={opt.value} value={opt.value}>{opt.label}</option>
+            ))}
+          </select>
+          {translating && (
+            <span style={{ fontSize: 11, color: 'var(--mac-text-secondary)' }}>翻译中...</span>
+          )}
         </div>
       </div>
 
