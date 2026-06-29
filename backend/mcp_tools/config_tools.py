@@ -17,7 +17,7 @@ class GetConfigTool(BaseTool):
             "github_token_set": bool(self._github_client),
             "hf_user": self._hf_user,
             "hf_token_set": bool(self._hf_token),
-            "version": "7.7.0",
+            "version": "7.8.0",
         }
         return ToolResult.json(config)
 
