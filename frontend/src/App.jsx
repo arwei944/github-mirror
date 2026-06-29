@@ -6,6 +6,7 @@ import ErrorBoundary from './components/ErrorBoundary'
 import CommandPalette from './components/CommandPalette'
 import HamburgerMenu from './components/HamburgerMenu'
 import SkeletonLoader from './components/SkeletonLoader'
+import RealTimeNotifications from './components/RealTimeNotifications'
 import useKeyboardShortcuts from './hooks/useKeyboardShortcuts'
 
 // Code-split pages
@@ -595,6 +596,9 @@ export default function App() {
         isOpen={commandPaletteOpen}
         onClose={() => setCommandPaletteOpen(false)}
       />
+
+      {/* Real-time notifications */}
+      <RealTimeNotifications />
     </div>
   )
 }

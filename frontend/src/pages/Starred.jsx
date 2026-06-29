@@ -1,16 +1,60 @@
 import React, { useState, useEffect, useCallback } from 'react'
 import api from '../api'
 
+// Simple in-memory + localStorage cache for descriptions
+const TRANSLATE_CACHE_KEY = 'github-mirror-starred-translations'
+
+function getTranslations() {
+  try {
+    const raw = localStorage.getItem(TRANSLATE_CACHE_KEY)
+    return raw ? JSON.parse(raw) : {}
+  } catch {
+    return {}
+  }
+}
+
+function setTranslations(obj) {
+  try {
+    localStorage.setItem(TRANSLATE_CACHE_KEY, JSON.stringify(obj))
+  } catch {}
+}
+
+async function translateToZh(text) {
+  if (!text || text.trim().length === 0) return text
+  const cache = getTranslations()
+  const key = text.trim().toLowerCase()
+  if (cache[key]) return cache[key]
+
+  try {
+    const url = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(text)}&langpair=en|zh-CN`
+    const res = await fetch(url)
+    const data = await res.json()
+    const translated = data?.responseData?.translatedText || text
+    if (translated && translated !== text) {
+      cache[key] = translated
+      setTranslations(cache)
+      return translated
+    }
+  } catch (e) {
+    // ignore translation failures
+  }
+  return text
+}
+
 export default function Starred({ onSelectRepo }) {
   const [repos, setRepos] = useState([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
   const [sort, setSort] = useState('updated')
+  const [page, setPage] = useState(1)
+  const [translations, setTranslationsLocal] = useState(() => getTranslations())
+
+  const PER_PAGE = 20
 
   const loadStarred = useCallback(async () => {
     setLoading(true)
     try {
-      const data = await api.get(`/api/github/user/starred?sort=${sort}&per_page=50`)
+      const data = await api.get(`/api/github/user/starred?sort=${sort}&per_page=100`)
       setRepos(Array.isArray(data) ? data : [])
     } catch (err) {
       console.error('Failed to load starred:', err)
@@ -22,10 +66,78 @@ export default function Starred({ onSelectRepo }) {
 
   useEffect(() => { loadStarred() }, [loadStarred])
 
-  const filtered = repos.filter(r =>
-    !search || (r.full_name || r.name || '').toLowerCase().includes(search.toLowerCase()) ||
-    (r.description || '').toLowerCase().includes(search.toLowerCase())
-  )
+  // Translate descriptions when repos change
+  useEffect(() => {
+    let cancelled = false
+    const cache = getTranslations()
+    const missing = repos.filter(r => {
+      const desc = r.description || ''
+      if (!desc) return false
+      const key = desc.trim().toLowerCase()
+      return !cache[key]
+    })
+
+    if (missing.length === 0) {
+      setTranslationsLocal(cache)
+      return
+    }
+
+    ;(async () => {
+      const updated = { ...cache }
+      for (const repo of missing.slice(0, 20)) {
+        if (cancelled) return
+        const desc = repo.description || ''
+        const key = desc.trim().toLowerCase()
+        if (!updated[key]) {
+          try {
+            const url = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(desc)}&langpair=en|zh-CN`
+            const res = await fetch(url)
+            const data = await res.json()
+            const translated = data?.responseData?.translatedText || desc
+            updated[key] = translated
+          } catch (e) {
+            updated[key] = desc
+          }
+        }
+      }
+      if (!cancelled) {
+        setTranslations(updated)
+        setTranslationsLocal(updated)
+      }
+    })()
+
+    return () => { cancelled = true }
+  }, [repos])
+
+  const filtered = repos.filter(r => {
+    const q = search.trim().toLowerCase()
+    if (!q) return true
+    const descKey = (r.description || '').toLowerCase()
+    const translatedDesc = translations[r.description?.trim().toLowerCase()] || descKey
+    return (
+      (r.full_name || r.name || '').toLowerCase().includes(q) ||
+      descKey.includes(q) ||
+      translatedDesc.toLowerCase().includes(q)
+    )
+  })
+
+  const totalPages = Math.max(1, Math.ceil(filtered.length / PER_PAGE))
+  const safePage = Math.min(page, totalPages)
+  const start = (safePage - 1) * PER_PAGE
+  const pageItems = filtered.slice(start, start + PER_PAGE)
+
+  useEffect(() => {
+    if (page !== safePage) setPage(safePage)
+  }, [safePage, page])
+
+  useEffect(() => { setPage(1) }, [search, sort])
+
+  const getDisplayDescription = (repo) => {
+    const desc = repo.description || '暂无描述'
+    if (!repo.description) return desc
+    const key = repo.description.trim().toLowerCase()
+    return translations[key] || desc
+  }
 
   return (
     <div className="animate-fade-in" style={{ padding: 20, height: '100%', overflow: 'auto' }}>
@@ -63,37 +175,75 @@ export default function Starred({ onSelectRepo }) {
           <div style={{ fontSize: 12 }}>去 GitHub 上发现感兴趣的项目吧</div>
         </div>
       ) : (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 12 }}>
-          {filtered.map((repo, i) => (
-            <div
-              key={i}
-              onClick={() => onSelectRepo?.(repo.name)}
+        <>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 12 }}>
+            {pageItems.map((repo, i) => (
+              <div
+                key={repo.id || i}
+                onClick={() => onSelectRepo?.(repo.name)}
+                style={{
+                  background: 'var(--mac-surface)', backdropFilter: 'var(--mac-blur)',
+                  border: '1px solid var(--mac-border)', borderRadius: 12,
+                  padding: 14, cursor: 'pointer',
+                  transition: 'transform 0.15s, box-shadow 0.15s',
+                }}
+                onMouseEnter={e => { e.currentTarget.style.transform = 'translateY(-2px)'; e.currentTarget.style.boxShadow = 'var(--mac-shadow-lg)'; }}
+                onMouseLeave={e => { e.currentTarget.style.transform = 'none'; e.currentTarget.style.boxShadow = 'none'; }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                  <img src={repo.owner?.avatar_url} alt="" style={{ width: 20, height: 20, borderRadius: '50%' }} />
+                  <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--mac-accent)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {repo.full_name || repo.name}
+                  </span>
+                </div>
+                <p style={{ fontSize: 12, color: 'var(--mac-text-secondary)', margin: '0 0 10px', lineHeight: 1.4, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
+                  {getDisplayDescription(repo)}
+                </p>
+                <div style={{ display: 'flex', gap: 12, fontSize: 11, color: 'var(--mac-text-secondary)' }}>
+                  {repo.language && <span>🔵 {repo.language}</span>}
+                  <span>⭐ {repo.stargazers_count || 0}</span>
+                  <span>🍴 {repo.forks_count || 0}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {/* Pagination */}
+          <div style={{
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            gap: 8, marginTop: 18, paddingBottom: 8,
+          }}>
+            <button
+              disabled={safePage <= 1}
+              onClick={() => setPage(p => Math.max(1, p - 1))}
               style={{
-                background: 'var(--mac-surface)', backdropFilter: 'var(--mac-blur)',
-                border: '1px solid var(--mac-border)', borderRadius: 12,
-                padding: 14, cursor: 'pointer',
-                transition: 'transform 0.15s, box-shadow 0.15s',
+                padding: '6px 12px', borderRadius: 8, fontSize: 12,
+                border: '1px solid var(--mac-border)',
+                background: safePage <= 1 ? 'var(--mac-bg)' : 'var(--mac-surface)',
+                color: safePage <= 1 ? 'var(--mac-text-secondary)' : 'var(--mac-text)',
+                cursor: safePage <= 1 ? 'not-allowed' : 'pointer',
               }}
-              onMouseEnter={e => { e.currentTarget.style.transform = 'translateY(-2px)'; e.currentTarget.style.boxShadow = 'var(--mac-shadow-lg)'; }}
-              onMouseLeave={e => { e.currentTarget.style.transform = 'none'; e.currentTarget.style.boxShadow = 'none'; }}
             >
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-                <img src={repo.owner?.avatar_url} alt="" style={{ width: 20, height: 20, borderRadius: '50%' }} />
-                <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--mac-accent)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                  {repo.full_name || repo.name}
-                </span>
-              </div>
-              <p style={{ fontSize: 12, color: 'var(--mac-text-secondary)', margin: '0 0 10px', lineHeight: 1.4, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
-                {repo.description || '暂无描述'}
-              </p>
-              <div style={{ display: 'flex', gap: 12, fontSize: 11, color: 'var(--mac-text-secondary)' }}>
-                {repo.language && <span>🔵 {repo.language}</span>}
-                <span>⭐ {repo.stargazers_count || 0}</span>
-                <span>🍴 {repo.forks_count || 0}</span>
-              </div>
-            </div>
-          ))}
-        </div>
+              上一页
+            </button>
+            <span style={{ fontSize: 12, color: 'var(--mac-text-secondary)' }}>
+              {safePage} / {totalPages}
+            </span>
+            <button
+              disabled={safePage >= totalPages}
+              onClick={() => setPage(p => Math.min(totalPages, p + 1))}
+              style={{
+                padding: '6px 12px', borderRadius: 8, fontSize: 12,
+                border: '1px solid var(--mac-border)',
+                background: safePage >= totalPages ? 'var(--mac-bg)' : 'var(--mac-surface)',
+                color: safePage >= totalPages ? 'var(--mac-text-secondary)' : 'var(--mac-text)',
+                cursor: safePage >= totalPages ? 'not-allowed' : 'pointer',
+              }}
+            >
+              下一页
+            </button>
+          </div>
+        </>
       )}
     </div>
   )
