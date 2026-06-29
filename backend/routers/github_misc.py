@@ -75,10 +75,18 @@ def enrich_event(event: dict) -> dict:
             if head and before and head != before:
                 commit_count = 1
         ref = payload.get("ref", "").replace("refs/heads/", "")
+        sender = event.get("actor", {}).get("login", "")
+        pusher = ""
+        if commits:
+            pusher = commits[0].get("committer", {}).get("name", "") or sender
+        else:
+            pusher = sender
         enriched["action"] = "push"
-        enriched["detail"] = f"推送了 {commit_count} 个提交到 {ref}" if commit_count > 0 else f"推送到 {ref}"
+        enriched["detail"] = f"{pusher} 推送了 {commit_count} 个提交到 {full_repo_name} 的 {ref} 分支" if commit_count > 0 else f"{pusher} 推送到 {full_repo_name} 的 {ref} 分支"
         enriched["commit_count"] = commit_count
         enriched["ref"] = payload.get("ref", "")
+        enriched["sender"] = sender
+        enriched["pusher"] = pusher
         enriched["commit_messages"] = [
             {"sha": c.get("sha", "")[:7], "message": c.get("message", "").split("\n")[0]}
             for c in (commits or [])[:5]

@@ -23,14 +23,16 @@ function formatEventText(event) {
   const label = EVENT_TYPE_LABELS[event.type] || event.type || '事件'
   const repo = event.repo || ''
   const sender = event.sender || ''
+  const branch = event.branch || ''
 
   if (event.type === 'PushEvent') {
     const commits = event.commits_count || 0
     const pusher = event.pusher || sender
+    const branchText = branch ? `的 ${branch} 分支` : ''
     if (commits > 0) {
-      return repo ? `${pusher} 向 ${repo} 推送了 ${commits} 个提交` : `${pusher} 推送了 ${commits} 个提交`
+      return repo ? `${pusher} 向 ${repo}${branchText}推送了 ${commits} 个提交` : `${pusher} 推送了 ${commits} 个提交`
     }
-    return repo ? `${pusher} 向 ${repo} 进行了推送` : `${pusher} 进行了推送`
+    return repo ? `${pusher} 向 ${repo}${branchText}进行了推送` : `${pusher} 进行了推送`
   }
 
   const action = event.action ? `${event.action}了` : ''
@@ -38,9 +40,11 @@ function formatEventText(event) {
 
   if (detail) {
     const who = sender ? `${sender} ` : ''
-    return repo ? `${who}${action} ${repo} 的 ${detail}` : `${who}${action} ${detail}`
+    const branchText = branch ? `的 ${branch} 分支` : ''
+    return repo ? `${who}${action} ${repo}${branchText} 的 ${detail}` : `${who}${action} ${detail}`
   }
-  if (repo) return `${sender} ${action} ${repo}`
+  const branchText = branch ? `的 ${branch} 分支` : ''
+  if (repo) return `${sender} ${action}${branchText} ${repo}`
   return `新的${label}活动`
 }
 
