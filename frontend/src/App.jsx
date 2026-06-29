@@ -358,7 +358,7 @@ export default function App() {
       eventSource.onmessage = (event) => {
         try {
           const msg = JSON.parse(event.data)
-          if (msg.type === 'event') {
+          if (msg.type) {
             setUnreadCount(prev => {
               const next = Math.min(prev + 1, 999)
               sessionStorage.setItem('github-mirror-unread', String(next))

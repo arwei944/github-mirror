@@ -200,7 +200,7 @@ async def events_stream():
         # 持续推送新事件
         last_len = len(event_queue)
         while True:
-            await asyncio.sleep(2)
+            await asyncio.sleep(0.2)
             if len(event_queue) > last_len:
                 for event in list(event_queue)[last_len:]:
                     yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"

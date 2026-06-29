@@ -63,6 +63,13 @@ async def github_webhook(request: Request):
             "action": payload.get("action", ""),
             "received_at": event["received_at"],
         }
+        if event_type == "PushEvent":
+            event_data["commits_count"] = len(payload.get("commits", []))
+            event_data["pusher"] = payload.get("pusher", {}).get("name", "")
+        elif event_type == "IssuesEvent":
+            event_data["issue_title"] = payload.get("issue", {}).get("title", "")
+        elif event_type == "PullRequestEvent":
+            event_data["pr_title"] = payload.get("pull_request", {}).get("title", "")
         event_queue.append(event_data)
         try:
             await ws_manager.broadcast({"type": "event", "data": event_data})

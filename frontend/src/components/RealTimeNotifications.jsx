@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react'
 import api from '../api'
 
-const MAX_NOTIFICATIONS = 5
+const MAX_NOTIFICATIONS = 50
 const MAX_DISPLAY = 3
 
 const EVENT_TYPE_LABELS = {
@@ -21,13 +21,26 @@ const EVENT_TYPE_LABELS = {
 
 function formatEventText(event) {
   const label = EVENT_TYPE_LABELS[event.type] || event.type || '事件'
-  const repo = event.repo_name || event.repo?.name || ''
-  const detail = event.detail || event.type_label || ''
+  const repo = event.repo || ''
+  const sender = event.sender || ''
+
+  if (event.type === 'PushEvent') {
+    const commits = event.commits_count || 0
+    const pusher = event.pusher || sender
+    if (commits > 0) {
+      return repo ? `${pusher} 向 ${repo} 推送了 ${commits} 个提交` : `${pusher} 推送了 ${commits} 个提交`
+    }
+    return repo ? `${pusher} 向 ${repo} 进行了推送` : `${pusher} 进行了推送`
+  }
+
+  const action = event.action ? `${event.action}了` : ''
+  const detail = event.issue_title || event.pr_title || event.detail || event.type_label || ''
 
   if (detail) {
-    return repo ? `${label}: ${detail} (${repo})` : `${label}: ${detail}`
+    const who = sender ? `${sender} ` : ''
+    return repo ? `${who}${action} ${repo} 的 ${detail}` : `${who}${action} ${detail}`
   }
-  if (repo) return `${repo} 有新的${label}活动`
+  if (repo) return `${sender} ${action} ${repo}`
   return `新的${label}活动`
 }
 
@@ -44,11 +57,13 @@ export default function RealTimeNotifications() {
       eventSource.onmessage = (event) => {
         try {
           const msg = JSON.parse(event.data)
-          if (msg.type === 'event') {
+          if (msg.type) {
             const text = formatEventText(msg)
             const notification = {
               id: Date.now() + Math.random(),
               text,
+              repo: msg.repo || '',
+              sender: msg.sender || '',
               time: new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
             }
 
@@ -196,7 +211,7 @@ export default function RealTimeNotifications() {
                   key={notification.id}
                   style={{
                     display: 'flex',
-                    alignItems: 'center',
+                    alignItems: 'flex-start',
                     gap: 10,
                     padding: '10px 14px',
                     borderBottom: '1px solid var(--mac-border, rgba(0, 0, 0, 0.04))',
@@ -212,22 +227,49 @@ export default function RealTimeNotifications() {
                     borderRadius: '50%',
                     background: 'var(--mac-accent)',
                     flexShrink: 0,
+                    marginTop: 6,
                   }} />
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{
                       fontSize: 12,
                       color: 'var(--mac-text)',
-                      lineHeight: 1.4,
+                      lineHeight: 1.5,
                       wordBreak: 'break-word',
                     }}>
                       {notification.text}
                     </div>
                     <div style={{
-                      fontSize: 10,
-                      color: 'var(--mac-text-secondary)',
-                      marginTop: 2,
+                      display: 'flex',
+                      gap: 8,
+                      marginTop: 4,
+                      alignItems: 'center',
                     }}>
-                      {notification.time}
+                      {notification.repo && (
+                        <span style={{
+                          fontSize: 10,
+                          color: 'var(--mac-accent)',
+                          background: 'rgba(0,0,0,0.04)',
+                          padding: '1px 6px',
+                          borderRadius: 4,
+                        }}>
+                          📦 {notification.repo}
+                        </span>
+                      )}
+                      {notification.sender && (
+                        <span style={{
+                          fontSize: 10,
+                          color: 'var(--mac-text-secondary)',
+                        }}>
+                          👤 {notification.sender}
+                        </span>
+                      )}
+                      <span style={{
+                        fontSize: 10,
+                        color: 'var(--mac-text-secondary)',
+                        marginLeft: 'auto',
+                      }}>
+                        {notification.time}
+                      </span>
                     </div>
                   </div>
                   <button
