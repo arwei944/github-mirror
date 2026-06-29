@@ -82,7 +82,7 @@ def enrich_event(event: dict) -> dict:
         else:
             pusher = sender
         enriched["action"] = "push"
-        enriched["detail"] = f"{pusher} 推送了 {commit_count} 个提交到 {full_repo_name} 的 {ref} 分支" if commit_count > 0 else f"{pusher} 推送到 {full_repo_name} 的 {ref} 分支"
+        enriched["detail"] = f"{pusher} 推送了 {commit_count} 个提交到 {repo_name} 的 {ref} 分支" if commit_count > 0 else f"{pusher} 推送到 {repo_name} 的 {ref} 分支"
         enriched["commit_count"] = commit_count
         enriched["ref"] = payload.get("ref", "")
         enriched["sender"] = sender
